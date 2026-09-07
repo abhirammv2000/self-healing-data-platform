@@ -10,7 +10,7 @@ services:
       - POSTGRES_DB=data_platform_db
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-2nd-db.sql #this will create the 2nd DB (local data warehouse)
+      - ./init-2nd-db.sql:/docker-entrypoint-initdb.d/init-2nd-db.sql #this will create the 2nd DB (local data warehouse)
   
   redis:
     image: redis
