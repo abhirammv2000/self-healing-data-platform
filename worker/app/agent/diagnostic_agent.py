@@ -11,21 +11,23 @@ import asyncio
 from worker.app.agent.index_incident import index_incident
 
 # ============================================================================
-# Graph construction — happens ONCE at module load, same lifetime pattern as
-# the legacy _diagnostic_chain. Compiled graphs are stateless across invocations
-# (state lives in the checkpointer and in the per-invoke initial state dict),
-# so reusing the same compiled graph for every failed run is safe and avoids
-# graph construction overhead on every call.
+# Graph construction — happens ONCE at module load. Compiled graphs are
+# stateless across invocations (state lives in the checkpointer and in the
+# per-invoke initial state dict), so reusing the same compiled graph for every
+# failed run is safe and avoids graph construction overhead on every call.
 # ============================================================================
 
 def _build_graph():
-    """Wire the three diagnostic nodes into a linear LangGraph.
+    """Wire the four diagnostic nodes into a linear LangGraph.
 
-    Topology: log_analysis → classification → recovery_planning → END
+    Topology: log_analysis → classification → retrieval → recovery_planning → END
     Linear and explicit — no conditional edges, no cycles. That's the right
     starting point per our design discussion: conditional branching is earned
     later when we have concrete reasons (low-confidence skip-to-escalate,
     anomaly warning mode, etc.), not added speculatively.
+
+    retrieval is a deterministic (non-LLM) node that pulls runbook and past-incident
+    context from pgvector for the recovery_planning node to ground its recommendation in.
     """
     graph=StateGraph(DiagnosticState)
 
@@ -56,9 +58,9 @@ _compiled_graph=_build_graph()
 
 
 # ============================================================================
-# Public entry point — signature is IDENTICAL to the legacy version, so the
-# executor's finally block doesn't change at all. The internal implementation
-# is now a graph invocation instead of a single chain call.
+# Public entry point — the executor imports and awaits this from its finally
+# block. The whole function is defensive: it catches its own errors and returns
+# None on any failure, so it can never break the executor.
 # ============================================================================
 
 async def run_diagnostic_agent(run_context: dict) -> int | None:
@@ -68,14 +70,15 @@ async def run_diagnostic_agent(run_context: dict) -> int | None:
     and observability has been recorded, BEFORE the webhook is dispatched. The returned
     recommendation_id (or None) is used by the webhook payload's recommendations_url.
 
-    The graph runs three specialized nodes in sequence:
-        log_analysis → classification → recovery_planning
+    The graph runs four nodes in sequence:
+        log_analysis → classification → retrieval → recovery_planning
 
-    Each node has graceful degradation (returns a sentinel on failure), so by the time
-    the graph completes, all three outputs are populated — with real outputs OR sentinels.
-    This means we ALMOST ALWAYS write a recommendation, even when the agent is partially
-    degraded. The recommendation row honestly reflects what the agent could and couldn't
-    figure out (sentinels lean toward 'escalate' to kick degraded cases to humans).
+    Each LLM node has graceful degradation (returns a sentinel on failure), so by the time
+    the graph completes, the classification and recovery_plan outputs are populated — with
+    real outputs OR sentinels. This means we ALMOST ALWAYS write a recommendation, even when
+    the agent is partially degraded. The recommendation row honestly reflects what the agent
+    could and couldn't figure out (sentinels lean toward 'escalate' to kick degraded cases
+    to humans).
 
     The only paths that return None (no recommendation written):
         1. run_context is not from a failed run (caller passed in a successful run by mistake)
