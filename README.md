@@ -1,7 +1,6 @@
-# ** WORK IN PROGRESS **
-
-
 # Self-Healing Data Pipeline Platform
+
+> **Status: work in progress.** The control plane, worker/executor, and the LangGraph diagnostic agent with pgvector RAG are all built and working end-to-end. Containerization, IaC, and the agent evaluation harness are still on the [roadmap](#roadmap).
 
 A multi-tenant, event-driven data pipeline orchestration platform with an LLM-powered diagnostic layer. Pipelines are defined and managed through a REST control plane, executed asynchronously by a queue-driven worker with built-in resilience (retries, circuit breaking), and — when a run fails — automatically diagnosed by a LangGraph multi-agent system that classifies the failure, retrieves relevant operational context via RAG, and recommends a recovery action for operator review.
 
@@ -238,6 +237,7 @@ pip install -r requirements.txt
 
 # 3. Configure environment
 cp .env.example .env        # then fill in the values (see Configuration below)
+# Windows (PowerShell): Copy-Item .env.example .env
 
 # 4. Start Postgres + Redis
 docker compose up -d
