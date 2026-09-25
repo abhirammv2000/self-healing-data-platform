@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/abhirammv2000/self-healing-data-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/abhirammv2000/self-healing-data-platform/actions/workflows/ci.yml)
 
-> **Status: work in progress.** The control plane, worker/executor, and the LangGraph diagnostic agent with pgvector RAG are built and working end to end, covered by 41 unit tests in CI and a 33-case labeled evaluation harness (90.9% classification accuracy, 84.8% recommended-action accuracy; see [Agent evaluation harness](#agent-evaluation-harness)). Containerization and IaC are still on the [roadmap](#roadmap).
+> **Status: working end to end, including on AWS.** The control plane, worker/executor, and the LangGraph diagnostic agent with pgvector RAG are built and working end to end, covered by 59 unit tests in CI and a 33-case labeled evaluation harness (90.9% classification accuracy, 84.8% recommended-action accuracy; see [Agent evaluation harness](#agent-evaluation-harness)). It's also been deployed to a real AWS EKS cluster via Terraform and Helm, checked, then torn down; see [Infra: AWS EKS deployment](#infra-aws-eks-deployment) below. There's no cluster running by default, local dev uses Docker Compose.
 
 A multi-tenant, event-driven data pipeline orchestration platform with an LLM-powered diagnostic layer. Pipelines are defined and managed through a REST control plane, executed asynchronously by a queue-driven worker with built-in resilience (retries, circuit breaking). When a run fails, a LangGraph multi-agent system classifies the failure, retrieves relevant operational context via RAG, and recommends a recovery action for operator review.
 
@@ -30,6 +30,7 @@ A multi-tenant, event-driven data pipeline orchestration platform with an LLM-po
   - [Agent evaluation harness](#agent-evaluation-harness)
 - [Design principles](#design-principles)
 - [Roadmap](#roadmap)
+- [Infra: AWS EKS deployment](#infra-aws-eks-deployment)
 
 ---
 
@@ -74,7 +75,7 @@ A clean separation underpins the whole design: **the control plane owns creation
 
 **Infra / tooling:** Docker Compose (Postgres + Redis for local dev) · uvicorn · croniter
 
-Gemini was chosen over OpenAI because the deployment target is **GCP Cloud Run**, keeping the model provider aligned with the cloud platform. `langchain-google-genai` (rather than the direct Gemini client) is used for first-class LangGraph compatibility.
+Gemini was the original model choice from early in the project, when GCP Cloud Run was the planned deployment target; the actual deployment (see below) ended up on AWS EKS instead, but the model provider was never revisited since Gemini continued to work fine. `langchain-google-genai` (rather than the direct Gemini client) is used for first-class LangGraph compatibility.
 
 ---
 
@@ -338,7 +339,7 @@ Past-incident rows are indexed automatically by the agent after each failed run;
 
 ## Testing
 
-**Automated: 41 unit tests, run in CI on every push.**
+**Automated: 59 unit tests, run in CI on every push.**
 
 ```bash
 pip install -r requirements-dev.txt
@@ -397,7 +398,7 @@ A few principles applied consistently across the codebase:
 
 ## Roadmap
 
-Built so far: the full control plane, the worker/executor with retries + circuit breaking + webhooks, the complete LangGraph multi-agent diagnostic system with pgvector RAG and tool calling, 60 unit tests in CI, a 33-case labeled evaluation harness scored against live Gemini calls (see [Agent evaluation harness](#agent-evaluation-harness) above), and an OpenTelemetry + Prometheus + Grafana observability stack (see [Observability](#observability) above).
+Built so far: the full control plane, the worker/executor with retries + circuit breaking + webhooks, the complete LangGraph multi-agent diagnostic system with pgvector RAG and tool calling, 59 unit tests in CI, a 33-case labeled evaluation harness scored against live Gemini calls (see [Agent evaluation harness](#agent-evaluation-harness) above), an OpenTelemetry + Prometheus + Grafana observability stack (see [Observability](#observability) above), and Terraform + Helm for a real AWS EKS deployment (see [Infra: AWS EKS deployment](#infra-aws-eks-deployment) below).
 
 Planned next:
 
@@ -407,6 +408,9 @@ Planned next:
 - [ ] **Make `partial_load` reachable**: `run_load`'s except clause doesn't currently distinguish "wrote 0 rows" from "wrote some rows then failed," so the classifier has no signal to produce that category in production, only in the eval's synthetic cases.
 - [ ] **Recommendation status sync into RAG**: update `incident_embeddings` metadata when a recommendation is applied/dismissed (currently a known TODO; retrieval falls back to similarity-only ranking until then).
 - [ ] **`Literal` type constraints** retrofitted across all API schemas (batch refactor).
-- [ ] **Containerization and Terraform-provisioned AWS EKS**: Dockerfiles for the control plane and worker, deployed via Helm to an EKS cluster (Terraform-provisioned VPC, EKS, RDS Postgres, ElastiCache Redis), checked, then torn down. In progress.
 - [ ] **Durable checkpointing**: swap the agent's `MemorySaver` for `PostgresSaver` if/when human-in-the-loop pauses are introduced.
 - [ ] **Conditional graph routing**: earned branching (e.g. low-confidence → skip straight to escalate) once there's a concrete reason for it.
+
+## Infra: AWS EKS deployment
+
+`infra/aws/` (Terraform) provisions a dedicated VPC, an EKS Auto Mode cluster, an RDS Postgres instance, an ElastiCache Redis instance, and two ECR repos. `helm/shdp/` deploys the control plane and worker to that cluster. Both were built and tested against a real cluster: images pushed to ECR, the chart installed, a pipeline run through the port-forwarded API and confirmed via `kubectl logs`, then torn down with `helm uninstall` and `terraform destroy`, checked against the AWS Console for no leftover billable resources. There's no cluster running by default; see `helm/shdp/README.md` for how to stand it back up.
