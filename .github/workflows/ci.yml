@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        # Unit tests only: LLM chains, the pgvector session, and the data warehouse
+        # write are all mocked, so no Postgres/pgvector, Redis, or GOOGLE_API_KEY is
+        # needed. conftest.py sets fake env vars before any app module is imported,
+        # since a few modules build DB engines/API clients at import time.
+        run: pytest tests -v

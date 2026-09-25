@@ -1,4 +1,9 @@
 from fastapi import FastAPI, Depends
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+from prometheus_fastapi_instrumentator import Instrumentator
+from shared.observability import setup_tracing, setup_logging, get_logger
+from shared.db import asyncio_engine
 from control_plane.app.routes.tenants import router as tenant_router
 from control_plane.app.routes.pipelines import router as pipeline_router
 from control_plane.app.routes.pipeline_steps import router as pipeline_step_router
@@ -10,7 +15,23 @@ from control_plane.app.routes.webhook_callbacks import run_callbacks_router, pip
 from control_plane.app.routes.api_keys import router as api_keys_router
 from control_plane.app.dependencies import verify_tenant
 
+setup_tracing("control-plane")
+setup_logging()
+log=get_logger(__name__)
+
 app=FastAPI()
+
+#FastAPIInstrumentor gives every request its own span (method, route, status code);
+#SQLAlchemyInstrumentor nests a child span under it for each query, so a trace shows which
+#query inside a slow request was slow. Needs .sync_engine, not the AsyncEngine itself,
+#per shared/db.py.
+FastAPIInstrumentor.instrument_app(app)
+SQLAlchemyInstrumentor().instrument(engine=asyncio_engine.sync_engine)
+#Instrumentator().expose() adds GET /metrics, scraped by observability/prometheus.yml.
+Instrumentator().instrument(app).expose(app)
+
+log.info("control_plane_starting")
+
 
 @app.get("/")
 def get_root():

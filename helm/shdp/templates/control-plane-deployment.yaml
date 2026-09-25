@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shdp-control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  selector:
+    matchLabels:
+      app: shdp-control-plane
+  template:
+    metadata:
+      labels:
+        app: shdp-control-plane
+    spec:
+      containers:
+        - name: control-plane
+          image: "{{ .Values.image.controlPlane.repository }}:{{ .Values.image.controlPlane.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.controlPlane.port }}
+          envFrom:
+            - configMapRef:
+                name: shdp-config
+            - secretRef:
+                name: shdp-secrets
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.controlPlane.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.controlPlane.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shdp-control-plane
+spec:
+  selector:
+    app: shdp-control-plane
+  ports:
+    - port: 80
+      targetPort: {{ .Values.controlPlane.port }}
+  # ClusterIP, not LoadBalancer: a LoadBalancer Service on EKS provisions an AWS ELB/NLB
+  # outside Terraform's state, so it must be deleted (helm uninstall) before terraform
+  # destroy or it's orphaned and keeps billing. See helm/shdp/README.md.
+  type: ClusterIP

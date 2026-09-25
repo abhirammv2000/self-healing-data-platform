@@ -1,0 +1,36 @@
+{
+  "n_cases": 33,
+  "classification_accuracy_strict": 0.909,
+  "classification_accuracy_lenient": 0.939,
+  "action_accuracy_strict": 0.848,
+  "action_accuracy_lenient": 0.879,
+  "both_correct_strict": 0.758,
+  "classification_confusion_pairs (gold -> predicted)": {
+    "unknown -> schema": 1,
+    "unknown -> network": 1,
+    "unknown -> quota": 1
+  },
+  "retrieval_ablation": [
+    {
+      "id": "retrieval-runbook-overrides-default-network-action",
+      "action_with_context": "pause_schedule",
+      "action_without_context": "retry_with_backoff",
+      "changed": true,
+      "matched_expected_fallback": true
+    },
+    {
+      "id": "retrieval-past-incident-suggests-escalate-over-retry",
+      "action_with_context": "retry_with_backoff",
+      "action_without_context": "retry_with_backoff",
+      "changed": false,
+      "matched_expected_fallback": true
+    },
+    {
+      "id": "retrieval-runbook-confirms-default-no-override",
+      "action_with_context": "retry_with_backoff",
+      "action_without_context": "retry_with_backoff",
+      "changed": false,
+      "matched_expected_fallback": true
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, HTTPException, Query 
+from fastapi import APIRouter, Depends, status, HTTPException, Query, Header, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.db import get_db
 from control_plane.app.services.pipeline_runs import get_pipeline_run_service, get_all_pipeline_runs_service, get_all_pipeline_runs_for_tenant_service, create_pipeline_run_service
@@ -60,22 +60,31 @@ async def get_all_pipeline_runs_for_tenant(tenant_id: int, session: AsyncSession
     return pipeline_runs
 
 #CREATE A PIPELINE RUN
+#idempotency_key comes from the Idempotency-Key header (FastAPI maps idempotency_key ->
+#"Idempotency-Key" by default). Optional; most callers (scheduled runs, casual API use)
+#won't send one.
 @pipeline_runs_router.post("/",response_model=PipelineRunResponse, status_code=status.HTTP_201_CREATED)
-async def create_pipeline_run(tenant_id: int, pipeline_id: int, session: AsyncSession=Depends(get_db)):
+async def create_pipeline_run(tenant_id: int, pipeline_id: int, response: Response, session: AsyncSession=Depends(get_db), idempotency_key: str | None=Header(default=None)):
     try:
-        pipeline_run=await create_pipeline_run_service(tenant_id, pipeline_id, session)
+        pipeline_run, created=await create_pipeline_run_service(tenant_id, pipeline_id, session, idempotency_key)
     except IntegrityError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail="Pipeline run could not be created because of a database constraint violation.")
     except SQLAlchemyError:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="Database error while creating pipeline run")
-    
+
     if not pipeline_run:
         raise HTTPException(status_code=404,detail="Pipeline not found. Please check the pipeline_id")
 
-    #push to redis
+    if not created:
+        #idempotent replay: this run was already enqueued once. Return it without pushing to
+        #Redis again, which would run the same pipeline run twice.
+        response.status_code=status.HTTP_200_OK
+        return pipeline_run
+
+    #push to redis, only for a new run
     try:
         await redis_client.rpush("pipeline_runs", str(pipeline_run.id))
     except Exception: #generic exception for now
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="Pipeline run was created, but failed to enqueue for execution.")
-    
+
     return pipeline_run

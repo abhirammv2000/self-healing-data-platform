@@ -6,10 +6,13 @@ import pandas as pd
 from worker.app.exceptions import IngestionStepError, ValidationStepError, TransformationStepError, LoadStepError
 import operator
 from shared.db import dw_engine
+from shared.observability import get_logger
 
-#step execution functions 
+log=get_logger(__name__)
+
+#step execution functions
 async def run_ingestion(config, run_context):
-    print(f"Running Ingestion with config: {config}")
+    log.info("ingestion_started", run_id=run_context.get("run_id"), config=config)
     
     run_id=run_context["run_id"]
     source_url=config.get("source_url")
@@ -38,10 +41,10 @@ async def run_ingestion(config, run_context):
     file_path.write_bytes(raw)
 
     run_context["ingestion"]={"file_path":str(file_path), "source_url": source_url, "ingested_at": timestamp}
-    print("Successfully completed ingestion step")
+    log.info("ingestion_succeeded", run_id=run_context.get("run_id"), file_path=str(file_path))
 
 async def run_validation(config, run_context):
-    print(f"Running Validation with config: {config}")
+    log.info("validation_started", run_id=run_context.get("run_id"), config=config)
 
     ingestion_data=run_context.get("ingestion") #get the context from ingestion step
     if not ingestion_data or "file_path" not in ingestion_data:
@@ -80,10 +83,10 @@ async def run_validation(config, run_context):
         raise ValidationStepError("Validation failed: " + "; ".join(errors))
     
     run_context["validation"]={"status": "passed", "validated_file_path":str(file_path), "row_count":len(df), "column_count":len(df.columns)}
-    print("Successfully completed validation step")
+    log.info("validation_succeeded", run_id=run_context.get("run_id"), row_count=len(df), column_count=len(df.columns))
 
 async def run_transformation(config, run_context):
-    print(f"Running Transformation with config: {config}")
+    log.info("transformation_started", run_id=run_context.get("run_id"), config=config)
 
     validation_data=run_context.get("validation")
     if not validation_data or "validated_file_path" not in validation_data:
@@ -146,12 +149,12 @@ async def run_transformation(config, run_context):
     transformed_file_path=file_path.parent/f"{file_path.stem}_transformed{file_path.suffix}"
     df.to_csv(transformed_file_path, index=False)
 
-    run_context["transformation"]={"input_file_path": str(file_path), "transformed_file_path": str(transformed_file_path), 
+    run_context["transformation"]={"input_file_path": str(file_path), "transformed_file_path": str(transformed_file_path),
                                    "row_count": len(df), "column_count": len(df.columns)}
-    print("Successfully completed transformation step")
+    log.info("transformation_succeeded", run_id=run_context.get("run_id"), row_count=len(df), column_count=len(df.columns))
 
 async def run_load(config, run_context):
-    print(f"Running Load with config: {config}")
+    log.info("load_started", run_id=run_context.get("run_id"), config=config)
 
     transformation_data=run_context.get("transformation")
     if not transformation_data or "transformed_file_path" not in transformation_data:
@@ -174,7 +177,7 @@ async def run_load(config, run_context):
         raise LoadStepError(f"Failed to write table to data warehouse: {e}")
 
     run_context["load"]={"data_warehouse_table_name": table_name, "row_count": len(df), "column_count": len(df.columns)}
-    print("Successfully completed load step")
+    log.info("load_succeeded", run_id=run_context.get("run_id"), table_name=table_name, row_count=len(df))
 
 #helper functions and mappings
 async def fetch_data(url: str):

@@ -5,3 +5,5 @@ data-platform-env/
 *.egg-info/
 .vscode/
 data/
+docker-compose.override.yml
+helm/shdp/secrets.local.yaml

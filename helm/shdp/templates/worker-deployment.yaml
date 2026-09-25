@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shdp-worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: shdp-worker
+  template:
+    metadata:
+      labels:
+        app: shdp-worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.image.worker.repository }}:{{ .Values.image.worker.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: shdp-config
+            - secretRef:
+                name: shdp-secrets
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

@@ -17,6 +17,44 @@ services:
     ports:
       - "6379:6379"
 
+  # ---- observability: all local, no API key, no vendor, no cost ----
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    restart: always
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC receiver, used by shared/observability.py's exporter
+
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    restart: always
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"   # Prometheus UI / query API
+    # host.docker.internal lets the container reach the control plane running on the host
+    # (uvicorn, started outside Docker); see observability/prometheus.yml's scrape target.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    restart: always
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin # local dev only, do not use in production
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"   # Grafana UI (3000 is already the ad-pulse-style default elsewhere, so mapped to 3001 on the host)
+    depends_on:
+      - prometheus
+      - jaeger
+
 volumes:
   pgdata:
 

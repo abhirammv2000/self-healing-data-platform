@@ -35,3 +35,14 @@ langchain-core==1.4.4
 langgraph==1.2.4
 pgvector==0.4.2
 langchain-text-splitters==1.1.2
+
+#observability: see shared/observability.py and shared/metrics.py
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
+opentelemetry-instrumentation-fastapi==0.65b0
+opentelemetry-instrumentation-sqlalchemy==0.65b0
+opentelemetry-instrumentation-redis==0.65b0
+prometheus-fastapi-instrumentator==8.1.0
+prometheus_client==0.26.0
+structlog==26.1.0

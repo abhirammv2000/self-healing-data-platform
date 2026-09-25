@@ -1,0 +1,383 @@
+[
+  {
+    "id": "net-connect-timeout-first-attempt",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the ingestion step on its first attempt due to an HTTP connection timeout after 30 seconds while fetching data from https://partner-feed.example.com/daily.csv. The issue has been classified as a network failure with high confidence (0.95). Since connection timeouts to external HTTP endpoints are typically transient and no retries were configured for this pipeline step, executing a retry with exponential backoff is the recommended path to allow temporary network congestion or endpoint load to clear. Note that no prior context or runbooks were available in the knowledge base for this failure."
+  },
+  {
+    "id": "net-read-timeout-mid-download",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the ingestion step with an IngestionStepError due to a read timeout while streaming the response body from https://data.vendor.io/exports/2026-09-17.csv. The failure has been classified as a transient network issue with 0.95 confidence. Because this failed on the first attempt with no retries configured, retrying the operation with exponential backoff is recommended to allow the external endpoint time to recover and complete the download successfully. Note that no relevant runbooks or prior incidents were retrieved from the context for this specific failure."
+  },
+  {
+    "id": "net-connection-reset-after-retries",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": "pause_schedule",
+    "explanation": "The pipeline failed at the ingestion step with an IngestionStepError caused by a connection reset by peer when querying https://api.supplier.com/v2/inventory. Upstream classification identified this as a network failure with high confidence (0.95). Connection resets at the TCP level typically represent transient network instability or temporary upstream endpoint issues. Although the process previously failed across 3 attempts with backoff, the transient nature of network connection resets makes retry_with_backoff the appropriate action before escalating further. Note that no prior runbooks or incident context were retrieved for this specific error."
+  },
+  {
+    "id": "net-5xx-upstream",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the 'ingestion' step due to an IngestionStepError when fetching from 'https://feed.retailer.com/skus.csv', returning an HTTP 503 Service Unavailable status. The failure classification identified this as a transient network issue with high confidence (0.95). Because the step failed on its initial attempt without retries configured, applying 'retry_with_backoff' provides the external server adequate time to recover from temporary overload or maintenance. Note that no prior context or runbook entries were available for this specific incident, so this decision is guided by the high-confidence classification and standard transient network error handling."
+  },
+  {
+    "id": "net-404-moved-endpoint",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "pause_schedule",
+    "predicted_action": "pause_schedule",
+    "acceptable_alternate_action": null,
+    "explanation": "The ingestion step failed on its initial attempt with an IngestionStepError due to an HTTP 404 Not Found response when requesting https://legacy.vendor.com/export/nightly.csv. The failure was classified as a network issue with high confidence (0.95). Because HTTP 4xx status codes indicate a permanent client-side or endpoint URL error (the resource does not exist) rather than a transient connectivity issue, retrying will not resolve the problem. Since no relevant runbooks or prior incident contexts were retrieved for this specific legacy endpoint, it is recommended to pause the schedule to prevent repeated predictable failures while a human operator verifies the URL or vendor export availability."
+  },
+  {
+    "id": "net-dns-nxdomain",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "pause_schedule",
+    "predicted_action": "pause_schedule",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the ingestion step with an IngestionStepError caused by a DNS lookup failure ([Errno 11001] getaddrinfo failed, DNS lookup returned NXDOMAIN) while attempting to access https://old-partner-domain.example.com/feed.csv. The upstream classification categorized this as a network failure with high confidence (0.95). Because an NXDOMAIN error indicates a permanent network/configuration issue (the domain does not exist) rather than a transient connection drop or timeout, retrying will not resolve the failure. No relevant prior incidents or runbooks were found in the retrieved context. Therefore, the schedule for this pipeline should be paused until the partner endpoint configuration is updated or investigated by an operator."
+  },
+  {
+    "id": "net-401-credentials-revoked",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "pause_schedule",
+    "predicted_action": "pause_schedule",
+    "acceptable_alternate_action": "escalate",
+    "explanation": "The pipeline failed during the ingestion step with an IngestionStepError caused by an HTTP 401 Unauthorized response from https://api.partner.com/v1/export. The failure was classified as 'network' with 0.95 confidence. Because an HTTP 401 indicates expired or revoked API credentials, this constitutes a permanent 4xx client/network error rather than a transient connectivity issue. Immediate retries or retries with backoff will fail until valid credentials are configured. No prior context or runbooks were available for this specific host. Consequently, pausing the pipeline schedule is recommended to prevent repeated failing attempts while operators update the authentication tokens."
+  },
+  {
+    "id": "quota-429-explicit",
+    "gold_classification": "quota",
+    "predicted_classification": "quota",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The ingestion step failed on its first attempt with an IngestionStepError due to an HTTP 429 Too Many Requests response from the external API endpoint. The failure classification is quota with high confidence (0.98), reflecting standard API rate limiting. Because the pipeline currently has no retries configured, applying a retry_with_backoff strategy will allow the API rate limits to reset before re-attempting ingestion. Note that no prior runbooks or incidents were retrieved for this specific failure, but handling HTTP 429 status codes with exponential delay is standard operational protocol."
+  },
+  {
+    "id": "quota-429-with-retry-after-header-mentioned",
+    "gold_classification": "quota",
+    "predicted_classification": "quota",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The ingestion step failed on its initial attempt with an IngestionStepError after receiving an HTTP 429 Too Many Requests response from https://api.ratelimited-vendor.com/data. The API explicitly requested a Retry-After window of 120 seconds, and the classification specialist identified this as a rate-limiting 'quota' failure with high confidence (0.98). Because this rate limit represents a temporary upstream restriction, the recommended action is retry_with_backoff to allow the exponential delay to respect the vendor's required 120-second window before retrying. Note that no prior context or runbooks were retrieved for this failure, so this recommendation relies entirely on the upstream classification and error signal evidence."
+  },
+  {
+    "id": "quota-daily-limit-exhausted",
+    "gold_classification": "quota",
+    "predicted_classification": "quota",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "pause_schedule",
+    "predicted_action": "pause_schedule",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the ingestion step on its first attempt due to an HTTP 403 Forbidden error (IngestionStepError) from https://api.premiumdata.com/v1/pull. The classification node identified this with 0.98 confidence as a quota issue, specifically noting that the daily API quota is exhausted and resets at 00:00 UTC. Per guidelines for 4xx HTTP errors, retrying immediately or with standard exponential backoff will not succeed while the daily limit remains active. Pausing the pipeline schedule is recommended until the quota resets at 00:00 UTC or the API quota tier is upgraded by an operator. No prior runbooks or incident contexts were retrieved for this specific error."
+  },
+  {
+    "id": "quota-throttled-mid-batch",
+    "gold_classification": "quota",
+    "predicted_classification": "quota",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The ingestion step failed due to an IngestionStepError when fetching from https://api.batchvendor.io/orders, returning an HTTP 429 Too Many Requests response ('concurrent request limit exceeded'). The classification node identified this as a 'quota' failure with high confidence (0.98), and log analysis confirmed a throttling pattern across 2 attempts with increasing delays. No prior incidents or runbooks were retrieved in the context for this failure. Because this is a transient rate-limiting issue, retrying with an exponential backoff is recommended to allow concurrent requests to subside and respect the upstream vendor's API limits."
+  },
+  {
+    "id": "schema-missing-optional-looking-column",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "schema_evolution",
+    "predicted_action": "schema_evolution",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the 'validation' step on its first attempt with a ValidationStepError, specifically citing missing required columns: ['promo_code']. The failure was classified as 'schema' with a high confidence of 0.98 due to the clear data shape mismatch. Since no prior runbooks or incident context were retrieved for this specific error, we rely on the upstream classification to recommend a schema evolution to allow the missing 'promo_code' column (e.g., as nullable) and replay the data."
+  },
+  {
+    "id": "schema-missing-core-identifier-column",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the validation step on its first attempt with a ValidationStepError indicating missing required columns: ['order_id', 'customer_id']. While the upstream classification identified this as a schema failure with high confidence (0.98), automated schema evolution (such as adding nullable columns) cannot resolve missing primary identifier columns without compromising downstream data integrity. Because this represents an unrecoverable schema validation issue originating from the source data, human intervention is required to investigate the upstream source. Note that no prior context or runbooks were retrieved for this failure."
+  },
+  {
+    "id": "schema-null-values-in-required-column",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "schema_evolution",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the 'validation' step on its initial attempt with a ValidationStepError due to 'Column total_amount contains null values'. The failure has been classified as 'schema' with high confidence (0.95). No prior runbooks or incident logs were retrieved for this error pattern. Because this is a schema validation failure where an expected non-null field contained null values, attempting a schema evolution (such as updating column nullability settings) and replaying the pipeline is recommended."
+  },
+  {
+    "id": "schema-row-count-below-minimum",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the validation step with a ValidationStepError due to a severe row count deficit (12 rows present versus a minimum requirement of 1000). The failure was classified as 'schema' with 0.95 confidence, and the attempt pattern shows it failed on the first attempt with no retries configured. Because the ingested source CSV appears severely truncated or incomplete, automated retries or schema evolution cannot resolve the missing data. No prior context or runbooks were retrieved for this failure. Escalation is required so a human operator can investigate the upstream export source and ensure the complete dataset is re-extracted before re-running."
+  },
+  {
+    "id": "schema-corrupt-csv-unreadable",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "schema_evolution",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the validation step with a ValidationStepError because line 4302 of the CSV contained 11 fields instead of the expected 8. The upstream classification identified this as a schema issue with a high confidence score of 0.95. Based on this classification, schema_evolution is recommended to accommodate potential additional fields from the upstream payload. Note that no prior runbooks or historical incident context were retrieved for this specific failure."
+  },
+  {
+    "id": "schema-type-mismatch-in-filter",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "schema_evolution",
+    "acceptable_alternate_action": "schema_evolution",
+    "explanation": "The pipeline failed during the transformation step on its first attempt with a TransformationStepError: \"Cannot cast filter value '2026-09-17' to int64 for column 'store_id'\". The issue was classified as a schema failure with high confidence (0.95) due to a clear type mismatch where a date string was encountered where an integer was expected. No relevant runbooks or prior incidents were retrieved for this specific failure. Following the high-confidence schema classification, schema_evolution is recommended to handle potential schema updates and replay the step, though human intervention may ultimately be necessary if the filter parameter itself was misconfigured upstream."
+  },
+  {
+    "id": "schema-load-write-rejected-by-warehouse",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "schema_evolution",
+    "predicted_action": "schema_evolution",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the load step with a LoadStepError due to a type mismatch on the 'discount_pct' column, which was expected as an integer but received numeric values. The failure was classified as a schema error with high confidence (0.95) on its initial attempt. Although no prior runbooks or incident context were retrieved for this specific error, schema_evolution is recommended to alter or update the destination table schema to accommodate the numeric type before re-running the load."
+  },
+  {
+    "id": "config-missing-source-url",
+    "gold_classification": "unknown",
+    "predicted_classification": "unknown",
+    "classification_confidence": 0.5,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The ingestion step failed on its initial attempt due to an IngestionStepError stating that the required 'source_url' parameter was missing from the configuration. The failure was classified as 'unknown' with a confidence of 0.5 since a missing job configuration parameter does not fit standard runtime failure categories such as network timeouts, schema shifts, or load errors. Additionally, no relevant runbooks or prior incidents were found in the knowledge base. Because automated retries, schema evolution, or raw replays cannot supply missing pipeline parameters, human intervention is required to correct the configuration. Consequently, the issue must be escalated to an operator."
+  },
+  {
+    "id": "config-transformation-unknown-filter-column",
+    "gold_classification": "unknown",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": "schema",
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the 'transformation' step on its first attempt with a TransformationStepError caused by an unknown filter column 'regoin'. The failure is classified as a 'schema' issue with 0.95 confidence. However, the error interpretation indicates this is a configuration typo ('regoin' instead of 'region') within the pipeline definition itself. Automated actions such as retries, schema evolution, or replaying from raw data will not resolve a bad code/configuration reference. Because no relevant prior runbooks or incident context were retrieved for this failure, human intervention is required to correct the filter column configuration in the pipeline definition."
+  },
+  {
+    "id": "config-orchestration-validation-before-ingestion",
+    "gold_classification": "unknown",
+    "predicted_classification": "unknown",
+    "classification_confidence": 0.4,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the validation step with a ValidationStepError due to a missing 'file_path' in run_context, caused by the step executing out of its expected dependency order before ingestion completed. Upstream classification categorized this failure as 'unknown' with a low confidence score of 0.4. Furthermore, no relevant runbooks or prior incident context were available in the knowledge base. Due to the unknown root cause, low classification confidence, and anomaly in step execution order, human intervention is required, so 'escalate' is recommended."
+  },
+  {
+    "id": "partial-load-constraint-violation-midbatch",
+    "gold_classification": "partial_load",
+    "predicted_classification": "partial_load",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "replay_from_raw",
+    "predicted_action": "replay_from_raw",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the load step with a LoadStepError due to a UNIQUE constraint violation on order_id=88213 after inserting 8,412 of 15,000 rows on its first attempt. The classification model categorized this as a partial_load failure with 0.95 confidence. Because a duplicate key constraint violation is a deterministic data error rather than a transient network or lock issue, simple retries will fail again. Replaying from raw ingested data allows the pipeline to re-run idempotent transformation or deduplication logic to safely reload the destination table. Note that no prior incidents or runbooks were found in the retrieved context for this failure."
+  },
+  {
+    "id": "partial-load-connection-dropped-midwrite",
+    "gold_classification": "partial_load",
+    "predicted_classification": "partial_load",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "replay_from_raw",
+    "predicted_action": "replay_from_raw",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the 'load' step with a 'LoadStepError' due to a dropped database connection after approximately 60% of the rows were written. The issue was classified as 'partial_load' with high confidence (0.95). Because the write operation was interrupted midway and no retries were configured for the load step, retrying directly could risk data duplication or inconsistent state in the target data warehouse. Therefore, replaying the job from the raw ingested data is recommended to ensure a clean, idempotent load. Note that no prior runbooks or similar incidents were found in the knowledge base, so this recommendation is based on the classification and error signals."
+  },
+  {
+    "id": "partial-load-vs-clean-network-failure-at-load-step",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the 'load' step with a LoadStepError ('could not connect to server: Connection refused'). The classification output categorized this failure as 'network' with a high confidence score of 0.95. According to the log analysis, the job failed on its initial attempt without any configured retries, and no rows were written to the target data warehouse. Because connection refusal is typically a transient connectivity issue (e.g., temporary network routing glitch or warehouse service restart), a retry_with_backoff is recommended to allow time for the endpoint to recover before attempting to load again. Note that no relevant runbooks or prior incidents were retrieved from the knowledge base for this failure."
+  },
+  {
+    "id": "unknown-bare-keyerror",
+    "gold_classification": "unknown",
+    "predicted_classification": "unknown",
+    "classification_confidence": 0.4,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed with a KeyError ('tenant_id') on an unknown step. Because the log analysis indicates a bare internal dictionary lookup failure with no descriptive context, and the upstream failure classification is 'unknown' with a low confidence score of 0.4, automated recovery actions like retrying or replaying cannot be safely applied. Additionally, no prior runbooks or incident context were available to guide resolution. Human intervention is required to investigate the codebase and execution context for the missing key."
+  },
+  {
+    "id": "unknown-generic-runtime-error",
+    "gold_classification": "unknown",
+    "predicted_classification": "unknown",
+    "classification_confidence": 0.3,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the transformation step with a generic RuntimeError ('unexpected state'). The failure classification was determined to be 'unknown' with a low confidence score of 0.3 due to the lack of descriptive error details, network/schema indicators, or attempt patterns. Furthermore, no relevant prior incidents or runbooks were available in the retrieved context to provide remediation guidance. Given the low confidence and unknown nature of this failure, human intervention is required to investigate the issue, so the recommended action is to escalate."
+  },
+  {
+    "id": "unknown-conflicting-signals",
+    "gold_classification": "schema",
+    "predicted_classification": "schema",
+    "classification_confidence": 0.85,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "schema_evolution",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed at the validation step after an initial 429 Too Many Requests error on ingestion resolved upon retry. The classification output identifies the issue as a schema failure with 0.85 confidence, noting that the proximate cause of termination was a downstream schema validation error rather than the transient upstream rate limit. Because no prior runbooks or incident logs were retrieved for this specific failure pattern, recovery relies on the upstream classification. Since the failure is classified as schema-related and data ingestion succeeded, schema_evolution is recommended to update the schema definition and allow processing to resume."
+  },
+  {
+    "id": "degraded-log-analysis-on-what-would-be-clean-network-error",
+    "gold_classification": "unknown",
+    "predicted_classification": "network",
+    "classification_confidence": 0.8,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed with a ConnectTimeout ('connection timed out after 30s'), which was classified as a network failure with a confidence score of 0.8. However, the upstream log analysis step failed (notable signal 'log_analysis_failed'), leaving the failed step and attempt pattern unknown. Additionally, no prior runbooks or incident context were retrieved for this failure. Because the analysis pipeline is operating on degraded input and lacks visibility into the exact execution step, escalating to a human operator is recommended to investigate both the network timeout and the log processing issue."
+  },
+  {
+    "id": "degraded-log-analysis-on-what-would-be-clean-quota-error",
+    "gold_classification": "unknown",
+    "predicted_classification": "quota",
+    "classification_confidence": 0.75,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed with an IngestionStepError due to an HTTP 429 Too Many Requests response from https://api.vendor.com/data. This error was classified as a quota issue with 0.75 confidence. Although HTTP 429 errors typically indicate rate limits that could be addressed with a retry with backoff, the log analysis output contains the notable signal 'log_analysis_failed', meaning the step analysis was degraded and the exact failed step remains unknown. Furthermore, no relevant prior runbooks or incident context were retrieved. Because of the degraded upstream log analysis, escalating for human intervention is recommended to investigate both the rate limit and the log processing failure."
+  },
+  {
+    "id": "degraded-log-analysis-with-low-confidence-classification-should-still-escalate",
+    "gold_classification": "unknown",
+    "predicted_classification": "unknown",
+    "classification_confidence": 0.3,
+    "acceptable_alternate_classification": null,
+    "gold_action": "escalate",
+    "predicted_action": "escalate",
+    "acceptable_alternate_action": null,
+    "explanation": "The failure classification returned 'unknown' with a low confidence score of 0.3 for the TransformationStepError ('Unable to apply filter store_id > 100: unexpected error'). Furthermore, upstream analysis signals indicate 'log_analysis_failed', meaning step attempt patterns and exact execution context could not be determined. No relevant prior incidents or runbooks were retrieved in the context. Given the low confidence, degraded analysis outputs, and lack of clear failure context, human intervention is required to investigate the underlying issue before attempting automated recovery actions."
+  },
+  {
+    "id": "retrieval-runbook-overrides-default-network-action",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.95,
+    "acceptable_alternate_classification": null,
+    "gold_action": "pause_schedule",
+    "predicted_action": "pause_schedule",
+    "acceptable_alternate_action": null,
+    "explanation": "The failure occurred during the ingestion step with an IngestionStepError while fetching from https://api.legacyvendor.com/feed (HTTP 500 Internal Server Error). The issue was classified as a network failure with 0.95 confidence on the first attempt with no retries configured. While transient 500 errors typically warrant retry_with_backoff, per network.md#legacyvendor-quirks, api.legacyvendor.com is known to issue HTTP 500 errors during its maintenance window, and immediate retries risk creating duplicate downstream records. Therefore, pause_schedule is recommended to prevent data duplication until the window closes.",
+    "ablation": {
+      "action_without_context": "retry_with_backoff",
+      "expected_action_without_context": "retry_with_backoff",
+      "action_changed_vs_with_context": true,
+      "matches_expected_fallback": true
+    }
+  },
+  {
+    "id": "retrieval-past-incident-suggests-escalate-over-retry",
+    "gold_classification": "network",
+    "predicted_classification": "network",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "pause_schedule",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The pipeline failed during the ingestion step with an IngestionStepError due to an HTTP connection timeout (30s) while requesting https://api.partner.com/orders. The failure was classified as network with 0.98 confidence, and log analysis indicates this was the first attempt with no retries configured. Connection timeouts are typical transient issues suitable for retry_with_backoff. However, past incident context (rec_id=214, run_id=1988) shows that persistent timeouts on this exact endpoint previously resulted from a multi-day vendor outage where retries repeatedly failed. Therefore, retry_with_backoff is recommended as the initial recovery step, but operators should monitor the vendor status page and consider pausing the schedule if retries continue to time out.",
+    "ablation": {
+      "action_without_context": "retry_with_backoff",
+      "expected_action_without_context": "retry_with_backoff",
+      "action_changed_vs_with_context": false,
+      "matches_expected_fallback": true
+    }
+  },
+  {
+    "id": "retrieval-runbook-confirms-default-no-override",
+    "gold_classification": "quota",
+    "predicted_classification": "quota",
+    "classification_confidence": 0.98,
+    "acceptable_alternate_classification": null,
+    "gold_action": "retry_with_backoff",
+    "predicted_action": "retry_with_backoff",
+    "acceptable_alternate_action": null,
+    "explanation": "The ingestion step failed on its initial attempt with an IngestionStepError caused by an HTTP 429 Too Many Requests response from https://api.ratelimited-vendor.com/data. The failure has been classified as a quota issue with 0.98 confidence. In accordance with quota.md#rate-limits, 429 rate-limiting errors should be retried using exponential backoff starting at 30 seconds to allow the upstream vendor API rate limits to reset before retrying.",
+    "ablation": {
+      "action_without_context": "retry_with_backoff",
+      "expected_action_without_context": "retry_with_backoff",
+      "action_changed_vs_with_context": false,
+      "matches_expected_fallback": true
+    }
+  }
+]

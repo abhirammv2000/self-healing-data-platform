@@ -1,0 +1,40 @@
+# Overridden per-deploy via `helm install --set image.controlPlane.repository=... -f secrets.yaml`
+# (secrets.yaml is gitignored, see helm/shdp/README.md).
+
+image:
+  controlPlane:
+    repository: ""   # set at deploy time (terraform output ecr_control_plane_repo)
+    tag: "latest"
+  worker:
+    repository: ""   # terraform output ecr_worker_repo
+    tag: "latest"
+  pullPolicy: Always
+
+controlPlane:
+  replicaCount: 1
+  port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+worker:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Non-secret config, matching shared/config.py's env var names. DB/Redis hosts and secrets
+# come from a separate, gitignored secrets values file at deploy time.
+env:
+  ENV: "aws-portfolio-test"
+  GEMINI_MODEL: "gemini-3.6-flash"
+  GEMINI_EMBEDDING_MODEL: "gemini-embedding-001"
+  OTEL_TRACES_ENABLED: "false" # no Jaeger deployed to this cluster, see helm/shdp/README.md

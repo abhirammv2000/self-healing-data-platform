@@ -17,6 +17,7 @@ class PipelineRunResponse(BaseModel):
     error_type: Optional[str]
     error_message: Optional[str]
     retry_count: int
+    idempotency_key: Optional[str]
 
     model_config = {
         "from_attributes": True

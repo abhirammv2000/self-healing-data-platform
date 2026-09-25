@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # the control plane runs on the host (uvicorn, not containerized), so Prometheus reaches it
+  # via host.docker.internal, wired up in docker-compose.yml's extra_hosts for this service.
+  - job_name: control-plane
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+    metrics_path: /metrics
+
+  # the worker is a separate process with its own prometheus_client registry, so its metrics
+  # (pipeline_runs_total, diagnostic_agent_*) need their own scrape target to reach Prometheus.
+  # See worker/app/main.py's start_http_server(8001) call.
+  - job_name: worker
+    static_configs:
+      - targets: ["host.docker.internal:8001"]
+    metrics_path: /metrics

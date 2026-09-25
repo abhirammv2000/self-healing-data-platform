@@ -3,6 +3,8 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from sqlalchemy.exc import SQLAlchemyError
 from shared.db import async_session
+from shared.observability import get_logger, get_tracer
+from shared import metrics
 from control_plane.app.models.agent_recommendations import AgentRecommendation
 from worker.app.agent.state import DiagnosticState
 from worker.app.agent.nodes import (log_analysis_node,classification_node,recovery_planning_node,)
@@ -10,8 +12,11 @@ from worker.app.agent.retrieval_node import retrieval_node
 import asyncio
 from worker.app.agent.index_incident import index_incident
 
+log=get_logger(__name__)
+tracer=get_tracer(__name__)
+
 # ============================================================================
-# Graph construction — happens ONCE at module load. Compiled graphs are
+# Graph construction happens ONCE at module load. Compiled graphs are
 # stateless across invocations (state lives in the checkpointer and in the
 # per-invoke initial state dict), so reusing the same compiled graph for every
 # failed run is safe and avoids graph construction overhead on every call.
@@ -20,19 +25,17 @@ from worker.app.agent.index_incident import index_incident
 def _build_graph():
     """Wire the four diagnostic nodes into a linear LangGraph.
 
-    Topology: log_analysis → classification → retrieval → recovery_planning → END
-    Linear and explicit — no conditional edges, no cycles. That's the right
-    starting point per our design discussion: conditional branching is earned
-    later when we have concrete reasons (low-confidence skip-to-escalate,
-    anomaly warning mode, etc.), not added speculatively.
+    Topology: log_analysis -> classification -> retrieval -> recovery_planning -> END
+    No conditional edges, no cycles. Conditional branching (low-confidence
+    skip-to-escalate, anomaly warning mode, etc.) is earned later, once we have
+    concrete reasons for it.
 
     retrieval is a deterministic (non-LLM) node that pulls runbook and past-incident
     context from pgvector for the recovery_planning node to ground its recommendation in.
     """
     graph=StateGraph(DiagnosticState)
 
-    #register each node as a named graph node. The names are what we reference
-    #when wiring edges below — keep them stable, they show up in logs and traces.
+    #register each node as a named graph node. Keep these names stable, they show up in logs and traces.
     graph.add_node("log_analysis", log_analysis_node)
     graph.add_node("classification", classification_node)
     graph.add_node("retrieval", retrieval_node)
@@ -47,10 +50,9 @@ def _build_graph():
     graph.add_edge("retrieval", "recovery_planning")
     graph.add_edge("recovery_planning", END)
 
-    #MemorySaver per our design call — in-process checkpointing, lost on restart.
-    #fine for MVP: diagnostic runs complete in a few seconds with no human-in-the-loop
-    #pauses. Swapping to PostgresSaver later is a one-line change if we ever want
-    #durable checkpointing.
+    #MemorySaver: in-process checkpointing, lost on restart. Fine for MVP since
+    #diagnostic runs complete in a few seconds with no human-in-the-loop pauses.
+    #Swapping to PostgresSaver later is a one-line change if we need durable checkpointing.
     return graph.compile(checkpointer=MemorySaver())
 
 
@@ -58,7 +60,7 @@ _compiled_graph=_build_graph()
 
 
 # ============================================================================
-# Public entry point — the executor imports and awaits this from its finally
+# Public entry point. The executor imports and awaits this from its finally
 # block. The whole function is defensive: it catches its own errors and returns
 # None on any failure, so it can never break the executor.
 # ============================================================================
@@ -71,19 +73,17 @@ async def run_diagnostic_agent(run_context: dict) -> int | None:
     recommendation_id (or None) is used by the webhook payload's recommendations_url.
 
     The graph runs four nodes in sequence:
-        log_analysis → classification → retrieval → recovery_planning
+        log_analysis -> classification -> retrieval -> recovery_planning
 
     Each LLM node has graceful degradation (returns a sentinel on failure), so by the time
-    the graph completes, the classification and recovery_plan outputs are populated — with
-    real outputs OR sentinels. This means we ALMOST ALWAYS write a recommendation, even when
-    the agent is partially degraded. The recommendation row honestly reflects what the agent
-    could and couldn't figure out (sentinels lean toward 'escalate' to kick degraded cases
-    to humans).
+    the graph completes, classification and recovery_plan are always populated, either with
+    outputs or sentinels. So we almost always write a recommendation, even when the agent is
+    partially degraded (sentinels lean toward 'escalate' to kick degraded cases to humans).
 
     The only paths that return None (no recommendation written):
         1. run_context is not from a failed run (caller passed in a successful run by mistake)
         2. run_context fails to serialize to JSON (extremely unlikely, defensive only)
-        3. The graph itself crashes (e.g. langgraph internal error — not a node failure)
+        3. The graph itself crashes (e.g. a langgraph internal error, not a node failure)
         4. The recommendation persistence to DB fails
 
     Returns the new AgentRecommendation.id on success, or None on the above failure modes.
@@ -101,16 +101,16 @@ async def run_diagnostic_agent(run_context: dict) -> int | None:
     error_message=run_context.get("error_message","No error message available")
 
     #serialize run_context once at the boundary. All three nodes read the same JSON
-    #from state — no point re-running json.dumps three times. default=str handles
-    #datetime objects gracefully without it, json.dumps would throw on the first datetime.
+    #from state, no point re-running json.dumps three times. default=str handles
+    #datetime objects; without it json.dumps would throw on the first datetime.
     try:
         run_context_json=json.dumps(run_context,indent=2,default=str)
     except Exception as e:
-        print(f"Agent: failed to serialize run_context for run_id={run_id}: {e}")
+        log.error("agent_run_context_serialize_failed", run_id=run_id, error=str(e))
         return None
 
-    #build the initial state for the graph. Output fields start as None — each
-    #node writes its slot, LangGraph merges those writes into the running state.
+    #build the initial state for the graph. Output fields start as None; each
+    #node writes its slot, and LangGraph merges those writes into the running state.
     initial_state: DiagnosticState={
         "run_id": run_id,
         "pipeline_id": pipeline_id,
@@ -125,35 +125,36 @@ async def run_diagnostic_agent(run_context: dict) -> int | None:
     }
 
     #the checkpointer needs a thread_id to associate state checkpoints with a logical
-    #conversation/run. Using str(run_id) is natural — it's unique per diagnostic, and
-    #if we ever want to resume a checkpoint post-MVP, we can look it up by run_id.
+    #conversation/run. str(run_id) is unique per diagnostic, and lets us look up a
+    #checkpoint by run_id if we ever want to resume one post-MVP.
     config={"configurable": {"thread_id": str(run_id)}}
 
-    #invoke the graph. We catch broad Exception here because we want the same defensive
-    #posture as the legacy implementation — the agent is best-effort. Individual node
-    #failures are already absorbed by their own try/except + sentinels, so reaching this
-    #catch means something structural broke (langgraph internals, our wiring, etc.).
+    #invoke the graph. We catch broad Exception here because the agent is best-effort.
+    #Individual node failures are already absorbed by their own try/except + sentinels, so
+    #reaching this catch means something structural broke (langgraph internals, our wiring, etc.).
     try:
-        final_state=await _compiled_graph.ainvoke(initial_state,config=config)
+        with tracer.start_as_current_span("diagnostic_agent_graph", attributes={"run_id": run_id}):
+            final_state=await _compiled_graph.ainvoke(initial_state,config=config)
     except Exception as e:
-        print(f"Agent: graph invocation failed for run_id={run_id}: {e}")
+        log.error("agent_graph_invocation_failed", run_id=run_id, error=str(e))
         return None
 
-    #with graceful degradation, all three outputs should always be populated by now —
-    #but defend against the impossible-but-not-zero case where the graph somehow returned
-    #without populating recovery_plan or classification. Better to return None than write
-    #a half-filled recommendation row to the DB.
+    #with graceful degradation, all three outputs should always be populated by now.
+    #still defend against the graph somehow returning without recovery_plan or classification
+    #populated. Better to return None than write a half-filled recommendation row to the DB.
     classification=final_state.get("classification")
     recovery_plan=final_state.get("recovery_plan")
     if classification is None or recovery_plan is None:
-        print(f"Agent: graph completed but missing required outputs for run_id={run_id} — skipping persistence")
+        log.error("agent_graph_missing_outputs", run_id=run_id)
         return None
 
-    #persist the recommendation in a FRESH session — same pattern as the legacy code and
-    #the webhook dispatcher. The agent shouldn't inherit the executor's session state.
-    #We use recovery_plan.explanation directly per our earlier design call — option (a):
-    #trust the recovery planning node to weave together the upstream reasoning into clean
-    #prose, rather than mechanically concatenating fields from all three nodes.
+    metrics.diagnostic_agent_classifications_total.labels(classification=classification.failure_classification).inc()
+    metrics.diagnostic_agent_recommendations_total.labels(action=recovery_plan.recommended_action).inc()
+
+    #persist the recommendation in a fresh session, same pattern as the webhook dispatcher.
+    #The agent shouldn't inherit the executor's session state. We use recovery_plan.explanation
+    #directly, trusting the recovery planning node to weave the upstream reasoning into clean
+    #prose instead of mechanically concatenating fields from all three nodes.
     async with async_session() as session:
         try:
             recommendation=AgentRecommendation(
@@ -163,7 +164,7 @@ async def run_diagnostic_agent(run_context: dict) -> int | None:
                 failure_classification=classification.failure_classification,
                 recommended_action=recovery_plan.recommended_action,
                 explanation=recovery_plan.explanation,
-                #status defaults to "pending" on the model — the tenant decides what to do
+                #status defaults to "pending" on the model; the tenant decides what to do
                 #with the recommendation (apply it, dismiss it). The agent never auto-sets
                 #status beyond pending, even when it recommends 'escalate'.
             )
@@ -171,18 +172,21 @@ async def run_diagnostic_agent(run_context: dict) -> int | None:
             await session.commit()
             await session.refresh(recommendation)
 
-            #fire-and-forget incident indexing. Same pattern as the webhook dispatcher in the executor —
-            #the indexing happens in the background; the agent returns the recommendation_id immediately
-            #so the executor's webhook payload can use it. If indexing fails, it's logged but doesn't
+            #fire-and-forget incident indexing, same pattern as the webhook dispatcher in the executor.
+            #Indexing happens in the background; the agent returns the recommendation_id immediately
+            #so the executor's webhook payload can use it. A failure here is logged but doesn't
             #affect this run's response.
             asyncio.create_task(index_incident(run_context=run_context,recommendation_id=recommendation.id,failure_classification=classification.failure_classification,
                                                recommended_action=recovery_plan.recommended_action,explanation=recovery_plan.explanation))
 
-            print(f"Agent: wrote recommendation_id={recommendation.id} for run_id={run_id} "
-                  f"({classification.failure_classification} → {recovery_plan.recommended_action})")
+            #structlog's JSONRenderer writes UTF-8 bytes to a stream reconfigured for UTF-8 in
+            #worker/app/main.py, instead of depending on the console's default codepage the way
+            #a bare print() did. That avoids the UnicodeEncodeError this line used to hit.
+            log.info("agent_recommendation_written", run_id=run_id, recommendation_id=recommendation.id,
+                     classification=classification.failure_classification, recommended_action=recovery_plan.recommended_action)
             return recommendation.id
 
         except SQLAlchemyError as e:
             await session.rollback()
-            print(f"Agent: failed to persist recommendation for run_id={run_id}: {e}")
+            log.error("agent_recommendation_persist_failed", run_id=run_id, error=str(e))
             return None
