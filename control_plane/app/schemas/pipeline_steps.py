@@ -8,7 +8,7 @@ StepType=Literal["ingestion", "validation", "transformation", "load"]
 #id, created_at are auto-generated; is_active defaults to True.
 class PipelineStepCreate(BaseModel):
     step_type: StepType
-    step_order: int=Field(ge=1)  #must be at least 1 — execution is sequential starting from 1
+    step_order: int=Field(ge=1)  #must be at least 1, execution is sequential starting from 1
     config: Optional[dict]=None  #flexible JSON config, validated as a Python dict by Pydantic
 
 #step_type and step_order are updatable in case the user wants to reorder steps or change what a step does

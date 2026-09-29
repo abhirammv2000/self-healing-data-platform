@@ -1,8 +1,8 @@
-"""Runbook indexer — run manually as `python -m worker.app.agent.index_runbooks`.
+"""Runbook indexer, run manually as `python -m worker.app.agent.index_runbooks`.
 
 Scans worker/app/agent/runbooks/*.md, chunks each file by markdown headers, embeds the chunks, and replaces all source_type='runbook' rows in incident_embeddings with the new set.
 
-Idempotent by design: each invocation fully replaces the runbook index. This is the right semantics because runbooks on disk are the source of truth — the DB is just a derived index that should always reflect the current disk state.
+Idempotent by design: each invocation fully replaces the runbook index. This is the right semantics because runbooks on disk are the source of truth, the DB is just a derived index that should always reflect the current disk state.
 
 Run this whenever a runbook file is added, edited, or deleted.
 """
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from shared.config import DATABASE_URL_SYNC
 from shared.embeddings import embed_texts
-#we import the model directly. The __init__.py at control_plane/app/models/ registers all models with Base.metadata, so importing IncidentEmbedding alone is enough — 
+#we import the model directly. The __init__.py at control_plane/app/models/ registers all models with Base.metadata, so importing IncidentEmbedding alone is enough, 
 # but we're using a sync Session here (not the async session from shared/db.py) since this is a one-shot CLI script and async overhead is wasted.
 from control_plane.app.models.incident_embeddings import IncidentEmbedding
 
@@ -24,7 +24,7 @@ RUNBOOKS_DIR=Path(__file__).parent/"runbooks"
 #section as its own logical chunk. Within sections, if any section is unusually long, we fall back to character-level splitting so we don't blow past embedding context limits or 
 # produce one giant chunk that retrieves poorly.
 #chunk_size=1500 chars is well under our ~500-token target (roughly 4 chars/token average for English). chunk_overlap=200 preserves context across split boundaries.
-#these are deliberately generous — our sections are mostly small enough that the character-level splitter rarely activates. The overlap matters more when sections are large enough to split.
+#these are deliberately generous, our sections are mostly small enough that the character-level splitter rarely activates. The overlap matters more when sections are large enough to split.
 MARKDOWN_HEADERS_TO_SPLIT_ON=[("##", "section")] #we only care about level-2 headers. Level-1 (the runbook title) is the same per file and doesn't add retrieval signal.
 CHUNK_SIZE=1500
 CHUNK_OVERLAP=200
@@ -34,7 +34,7 @@ def _category_from_filename(filename: str) -> str:
     """Derive the FailureClassification category from the runbook filename.
 
     network.md -> 'network', partial_load.md -> 'partial_load', etc. The category goes into meta so the retrieval node can later filter or weight runbooks by category 
-    if we want to. Keeping this as a small helper makes the convention explicit — if we ever add a runbook whose filename doesn't match a category Literal exactly, this is the one spot to handle that.
+    if we want to. Keeping this as a small helper makes the convention explicit, if we ever add a runbook whose filename doesn't match a category Literal exactly, this is the one spot to handle that.
     """
     return filename.replace(".md", "")
 
@@ -54,15 +54,15 @@ def _chunk_runbook(filepath: Path) -> list[dict]:
       1. MarkdownHeaderTextSplitter parses the file, producing one Document per ## section with the section name in metadata.
       2. RecursiveCharacterTextSplitter then character-splits any section that exceeds CHUNK_SIZE, preserving the section metadata across the splits.
 
-    For most of our runbooks, phase 2 is a no-op — sections are 100-200 words each. But the safety net matters: if someone later writes a verbose Examples section, retrieval doesn't break.
+    For most of our runbooks, phase 2 is a no-op, sections are 100-200 words each. But the safety net matters: if someone later writes a verbose Examples section, retrieval doesn't break.
     """
     text=filepath.read_text(encoding="utf-8")
     category=_category_from_filename(filepath.name)
 
     #phase 1: split by ## headers. Each output Document has page_content (the section body) and metadata={"section": "What This Looks Like"} or similar.
-    #note that the level-1 # header (the runbook title) is NOT in our headers_to_split_on, so it gets prepended to the first section's content. That's fine — it gives the first chunk some extra context.
+    #note that the level-1 # header (the runbook title) is NOT in our headers_to_split_on, so it gets prepended to the first section's content. That's fine, it gives the first chunk some extra context.
     header_splitter=MarkdownHeaderTextSplitter(headers_to_split_on=MARKDOWN_HEADERS_TO_SPLIT_ON, strip_headers=False) 
-    #strip_headers=False keeps "## Examples" inside the chunk content. This is deliberate — having the section name in the embedded text gives the embedding model a strong anchor for what kind of content it is.
+    #strip_headers=False keeps "## Examples" inside the chunk content. This is deliberate, having the section name in the embedded text gives the embedding model a strong anchor for what kind of content it is.
     section_documents=header_splitter.split_text(text)
 
     #phase 2: char-level split for any oversized sections. RecursiveCharacterTextSplitter preserves the metadata field across splits, so we don't lose section context.
@@ -71,7 +71,7 @@ def _chunk_runbook(filepath: Path) -> list[dict]:
 
     out=[]
     for chunk in chunks:
-        #fall back to 'unknown_section' if for some reason the metadata is missing — defensive, shouldn't happen with our well-structured runbooks.
+        #fall back to 'unknown_section' if for some reason the metadata is missing, defensive, shouldn't happen with our well-structured runbooks.
         section=chunk.metadata.get("section", "unknown_section")
         out.append({"chunk_text": chunk.page_content,"source_ref": f"{filepath.name}#{_normalize_section(section)}",
                     "meta": {"category": category,"section": section, "filename": filepath.name,}})
@@ -107,11 +107,11 @@ def main():
     embeddings=embed_texts([c["chunk_text"] for c in all_chunks])
     print(f"Got {len(embeddings)} embedding vectors")
 
-    #single transaction: clear existing runbook rows, insert all new rows. Wrapping in one transaction means a partial failure leaves the prior runbook index intact — never half-indexed state.
+    #single transaction: clear existing runbook rows, insert all new rows. Wrapping in one transaction means a partial failure leaves the prior runbook index intact, never half-indexed state.
     engine=create_engine(DATABASE_URL_SYNC)
     with Session(engine) as session:
         try:
-            #wipe ALL existing runbook rows. We don't try to be clever about diffing — runbooks are small enough that full replacement is simpler and bug-free.
+            #wipe ALL existing runbook rows. We don't try to be clever about diffing, runbooks are small enough that full replacement is simpler and bug-free.
             delete_result=session.execute(delete(IncidentEmbedding).where(IncidentEmbedding.source_type=="runbook"))
             print(f"Deleted {delete_result.rowcount} existing runbook rows")
 

@@ -37,7 +37,7 @@ async def create_pipeline_service(tenant_id: int, pipeline_data: PipelineCreate,
 
 async def get_pipeline_service(tenant_id: int, pipeline_id: int, session: AsyncSession):
     #we check both the pipeline id as well as the tenant id to ensure only the correct tenant can get the pipeline
-    #If pipeline doesn’t exist, then returns none. If pipeline exists but belongs to another tenant, also returns None. This ensures we dont leak information like "this pipeline exists but not yours"
+    #If pipeline doesn't exist, then returns none. If pipeline exists but belongs to another tenant, also returns None. This ensures we dont leak information like "this pipeline exists but not yours"
     result=await session.execute(select(Pipeline).where(Pipeline.id==pipeline_id,Pipeline.tenant_id==tenant_id))
     pipeline_data=result.scalar_one_or_none()
     return pipeline_data

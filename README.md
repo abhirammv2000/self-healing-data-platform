@@ -57,10 +57,10 @@ A clean separation underpins the whole design: **the control plane owns creation
 - **Event-driven execution**: the worker blocks on a Redis list (`BLPOP`) and processes runs as they arrive, decoupling enqueue from execute.
 - **Configurable step pipeline**: pipelines are ordered sequences of steps. Built-in step handlers: `ingestion` (HTTP fetch via `httpx`), `validation` (schema/null/row-count checks via `pandas`), `transformation` (rename / filter / drop), and `load` (writes to a separate data-warehouse Postgres DB). Steps share a `run_context` dict so later steps can read earlier outputs.
 - **Automatic retries**: per-step retry config supports `exponential_backoff` and `exponential_backoff_jitter` strategies.
-- **Circuit breakers**: per-pipeline breakers (configurable failure threshold + rolling window) open to block runs after repeated failures, with `closed → open → half-open` state transitions. State lives in Postgres (source of truth).
+- **Circuit breakers**: per-pipeline breakers (configurable failure threshold + rolling window) open to block runs after repeated failures, with `closed -> open -> half-open` state transitions. State lives in Postgres (source of truth).
 - **Always-on observability**: every run writes a `run_context.json` capturing step attempts, timing, and outcomes, recorded in a `finally` block so it's captured regardless of how the run ends.
 - **Webhook callbacks**: fire-and-forget delivery (via `asyncio.create_task`) on run completion/failure, with full delivery audit records. Failed-run payloads include a `recommendations_url` pointing at the agent's diagnosis.
-- **Multi-agent failure diagnosis**: a LangGraph graph of specialized nodes (log analysis → classification → retrieval → recovery planning) produces a structured, grounded recommendation for every failed run.
+- **Multi-agent failure diagnosis**: a LangGraph graph of specialized nodes (log analysis -> classification -> retrieval -> recovery planning) produces a structured, grounded recommendation for every failed run.
 - **RAG-grounded recommendations**: the agent retrieves relevant runbook sections and the tenant's own past incidents from a pgvector store, so recommendations cite operational knowledge and history rather than reasoning from the error string alone.
 
 ---
@@ -108,7 +108,7 @@ A couple of intentional schema decisions worth calling out:
 1. **Enqueue**: the control plane creates a `pipeline_run` (`status="queued"`) and pushes its `run_id` onto the Redis `pipeline_runs` queue.
 2. **Pick up**: the worker's `BLPOP` loop receives the `run_id`.
 3. **Circuit-breaker gate**: if the pipeline's breaker is `open`, the run is marked `blocked` and execution stops.
-4. **Atomic claim**: the run is flipped `queued → running` in a single conditional `UPDATE`, so two workers can never both claim the same run.
+4. **Atomic claim**: the run is flipped `queued -> running` in a single conditional `UPDATE`, so two workers can never both claim the same run.
 5. **Execute steps**: steps run in `step_order`. Each step retries per its config (exponential backoff, optionally with jitter). Every attempt is recorded in `run_context["step_attempts"]`.
 6. **Resolve outcome**:
    - **Success:** run marked `success`.
@@ -129,7 +129,7 @@ When a run fails, `run_diagnostic_agent(run_context)` invokes a compiled **LangG
 **Topology**: linear, explicit, no cycles:
 
 ```
-log_analysis → classification → retrieval → recovery_planning → END
+log_analysis -> classification -> retrieval -> recovery_planning -> END
 ```
 
 | Node | Job |
@@ -318,7 +318,7 @@ OpenTelemetry tracing, Prometheus metrics, and structured logging are correlated
 docker compose up -d   # starts Jaeger (:16686), Prometheus (:9090), and Grafana (:3001) alongside Postgres/Redis
 ```
 
-- **Tracing** (`shared/observability.py`): every control-plane request and every worker operation (a pipeline step, the diagnostic agent's LangGraph invocation) gets a span, exported via OTLP to Jaeger. A failed run produced one trace with 3 correctly nested spans (`execute_pipeline_run` → `pipeline_step` and → `diagnostic_agent_graph`), confirmed by querying Jaeger's API directly.
+- **Tracing** (`shared/observability.py`): every control-plane request and every worker operation (a pipeline step, the diagnostic agent's LangGraph invocation) gets a span, exported via OTLP to Jaeger. A failed run produced one trace with 3 correctly nested spans (`execute_pipeline_run` -> `pipeline_step` and -> `diagnostic_agent_graph`), confirmed by querying Jaeger's API directly.
 - **Structured logging**: every `print()` in `worker/` and `shared/` (25 of them) was replaced with structured, JSON-rendered log calls via `structlog`. A custom processor stamps the *active span's* `trace_id`/`span_id` onto every log line. In one run, every log line shared the same `trace_id`, with different `span_id`s as execution moved between the pipeline-step span and the diagnostic-agent span, which is the point of combining the two tools.
 - **Metrics** (`shared/metrics.py`): `prometheus-fastapi-instrumentator` gives the control plane automatic HTTP metrics at `/metrics`. Custom domain counters (`pipeline_runs_total`, `pipeline_run_duration_seconds`, `diagnostic_agent_classifications_total`, `diagnostic_agent_recommendations_total`, `circuit_breaker_transitions_total`) are incremented in the worker. `prometheus_client` metrics are per-process, so the worker's counters never reached the control plane's `/metrics` until the worker got its own scrape target (`start_http_server(8001)`, a second `prometheus.yml` job); confirmed by querying Prometheus before the fix (empty) and after (populated, both targets `up`).
 - **Grafana** (`:3001`, anonymous admin access, local dev only) comes up with Prometheus and Jaeger pre-provisioned as datasources (`observability/grafana/provisioning/`), no manual setup.
@@ -375,7 +375,7 @@ No Postgres, pgvector, Redis, or `GOOGLE_API_KEY` is needed to run the suite; ev
 
 Retrieval ablation (the 3 cases that carry a hand-authored runbook/incident chunk, each run once with it and once with it stripped to `[]`): in 1 of 3, the retrieved context measurably changed the recommended action in the expected direction (a runbook note overriding the default network response for one specific host). In the other 2, the action came out identical with or without context. One of those is a control case where that's the expected result (the runbook simply confirms the default); the other is a weakness: a past-incident chunk describing a prior outage on the same pipeline/host didn't move the model off its default `retry_with_backoff`, when the incident history arguably should have. Three cases is too small to call this a trend.
 
-**What the confusion pairs show:** all 3 classification misses were `unknown → {network, quota, schema}`, never the other direction. Two of the three (`→ network`, `→ quota`) are cases whose `log_analysis` carries a `log_analysis_failed` signal: the model classified off the raw error text instead of deferring to the degradation signal the way the prompt instructs. In both, the *recommended action* still came out `escalate` anyway, so the operator-visible behavior was right even though the intermediate label wasn't. The third (`→ schema`) is the typo'd-filter-column config-bug case, where "schema" is a reasonable read even though "unknown" was the gold call; that one's covered by the case's own accepted alternate.
+**What the confusion pairs show:** all 3 classification misses were `unknown -> {network, quota, schema}`, never the other direction. Two of the three (`-> network`, `-> quota`) are cases whose `log_analysis` carries a `log_analysis_failed` signal: the model classified off the raw error text instead of deferring to the degradation signal the way the prompt instructs. In both, the *recommended action* still came out `escalate` anyway, so the operator-visible behavior was right even though the intermediate label wasn't. The third (`-> schema`) is the typo'd-filter-column config-bug case, where "schema" is a reasonable read even though "unknown" was the gold call; that one's covered by the case's own accepted alternate.
 
 **A pattern worth naming rather than averaging away:** 3 of the 5 strict misses on `recommended_action` (the ones with gold `escalate` and no accepted alternate) were all cases where the model instead picked `schema_evolution`: a null-value data-quality issue, a corrupt/unparseable CSV, and a case where an earlier, already-resolved quota blip in the same run muddied which failure was being classified. (A fourth, a column-type mismatch, also got `schema_evolution` over `escalate`, but that one counts as lenient-correct since the case's own gold label already flags `schema_evolution` as a defensible alternate.) The recovery-planning prompt doesn't currently draw a line between "this schema drift is safe to auto-evolve" and "this is a data-quality problem that only looks schema-shaped," so the model consistently reaches for the more automated-sounding action. That's a prompt gap, and the most concrete next step this eval surfaced.
 
@@ -387,7 +387,7 @@ A few principles applied consistently across the codebase:
 
 - **Control plane owns creation; worker owns execution.** Clean separation of the run lifecycle.
 - **Observability in `finally`, never as a step.** Run telemetry is always captured, regardless of the failure path.
-- **Layered architecture** per resource: model → schema → service → routes → migration, verified via Swagger before moving on.
+- **Layered architecture** per resource: model -> schema -> service -> routes -> migration, verified via Swagger before moving on.
 - **Dual filtering (`tenant_id + resource_id`)** on all tenant-scoped queries for ownership verification.
 - **Narrow `try` blocks in the service layer** so `HTTPException` is never swallowed by `SQLAlchemyError` handlers.
 - **`None` returns from services for 404 cases;** the route layer translates them to HTTP responses.
@@ -410,7 +410,7 @@ Planned next:
 - [ ] **Recommendation status sync into RAG**: update `incident_embeddings` metadata when a recommendation is applied/dismissed (currently a known TODO; retrieval falls back to similarity-only ranking until then).
 - [ ] **`Literal` type constraints** retrofitted across all API schemas (batch refactor).
 - [ ] **Durable checkpointing**: swap the agent's `MemorySaver` for `PostgresSaver` if/when human-in-the-loop pauses are introduced.
-- [ ] **Conditional graph routing**: earned branching (e.g. low-confidence → skip straight to escalate) once there's a concrete reason for it.
+- [ ] **Conditional graph routing**: earned branching (e.g. low-confidence -> skip straight to escalate) once there's a concrete reason for it.
 
 ## Infra: AWS EKS deployment
 

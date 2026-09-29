@@ -160,7 +160,7 @@ async def _run_executor_service(run_id: int):
                                 await session.commit()
                                 await session.refresh(pipeline_run)
                             except Exception as inner_e:
-                                #worst case: log it, but don’t mask original error
+                                #worst case: log it, but don't mask original error
                                 await session.rollback()
                                 log.error("retry_count_update_failed", run_id=run_id, error=str(inner_e))
 
@@ -228,7 +228,7 @@ async def _run_executor_service(run_id: int):
                     log.error("pipeline_run_failed", run_id=run_id, pipeline_id=pipeline_id, error_type=type(e).__name__, error_message=str(e))
 
             except Exception as inner_e:
-                #worst case: log it, but don’t mask original error
+                #worst case: log it, but don't mask original error
                 await session.rollback()
                 log.error("run_status_update_failed", run_id=run_id, error=str(inner_e))
 
