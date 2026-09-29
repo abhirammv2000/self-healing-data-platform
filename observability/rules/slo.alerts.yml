@@ -1,0 +1,228 @@
+# Alerts for the service level objectives in docs/SLOs.md.
+#
+# Burn-rate alerts follow the multi-window, multi-burn-rate approach from the
+# Google SRE workbook: an alert fires only when a long window AND a short window
+# both burn the error budget faster than a threshold. The long window keeps it
+# from firing on a blip, and the short window makes it stop firing soon after the
+# problem is fixed. A burn rate of 1 spends exactly the 30 day budget in 30 days.
+#
+#   14.4x over 1h and 5m   page    2% of the budget gone in an hour
+#   6x    over 6h and 30m  page    5% of the budget gone in six hours
+#   3x    over 1d and 2h   ticket  10% of the budget gone in a day
+#   1x    over 3d and 6h   ticket  10% of the budget gone in three days
+#
+# The cause-based alerts at the bottom cover things the ratios cannot see, such
+# as a process that has stopped and so sends no traffic at all.
+groups:
+  - name: api_availability_burn_rate
+    rules:
+      - alert: ApiAvailabilityFastBurn
+        expr: |
+          slo:api_error_ratio:rate1h > (14.4 * 0.005)
+          and
+          slo:api_error_ratio:rate5m > (14.4 * 0.005)
+        for: 2m
+        labels:
+          severity: page
+          slo: api_availability
+        annotations:
+          summary: "ApiAvailability is burning its error budget 14.4x too fast"
+          description: >-
+            The share of control plane requests returning 5xx was {{ $value | humanizePercentage }} over the last 1h and is still
+            above 14.4 * 0.005 over 5m. The 99.5% objective allows 0.5%. At this
+            rate the 30 day error budget is used up in about 2 days.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-availability.md
+      - alert: ApiAvailabilitySlowBurn
+        expr: |
+          slo:api_error_ratio:rate6h > (6 * 0.005)
+          and
+          slo:api_error_ratio:rate30m > (6 * 0.005)
+        for: 15m
+        labels:
+          severity: page
+          slo: api_availability
+        annotations:
+          summary: "ApiAvailability is burning its error budget 6x too fast"
+          description: >-
+            The share of control plane requests returning 5xx was {{ $value | humanizePercentage }} over the last 6h and is still
+            above 6 * 0.005 over 30m. The 99.5% objective allows 0.5%. At this
+            rate the 30 day error budget is used up in about 5 days.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-availability.md
+      - alert: ApiAvailabilityBudgetLeak
+        expr: |
+          slo:api_error_ratio:rate1d > (3 * 0.005)
+          and
+          slo:api_error_ratio:rate2h > (3 * 0.005)
+        for: 1h
+        labels:
+          severity: ticket
+          slo: api_availability
+        annotations:
+          summary: "ApiAvailability is burning its error budget 3x too fast"
+          description: >-
+            The share of control plane requests returning 5xx was {{ $value | humanizePercentage }} over the last 1d and is still
+            above 3 * 0.005 over 2h. The 99.5% objective allows 0.5%. At this
+            rate the 30 day error budget is used up in about 10 days.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-availability.md
+      - alert: ApiAvailabilityBudgetDrift
+        expr: |
+          slo:api_error_ratio:rate3d > (1 * 0.005)
+          and
+          slo:api_error_ratio:rate6h > (1 * 0.005)
+        for: 3h
+        labels:
+          severity: ticket
+          slo: api_availability
+        annotations:
+          summary: "ApiAvailability is burning its error budget 1x too fast"
+          description: >-
+            The share of control plane requests returning 5xx was {{ $value | humanizePercentage }} over the last 3d and is still
+            above 1 * 0.005 over 6h. The 99.5% objective allows 0.5%. At this
+            rate the 30 day error budget is used up in the full 30 days, so it is only just within budget.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-availability.md
+
+  - name: api_latency_burn_rate
+    rules:
+      - alert: ApiLatencyFastBurn
+        expr: |
+          slo:api_slow_ratio:rate1h > (14.4 * 0.05)
+          and
+          slo:api_slow_ratio:rate5m > (14.4 * 0.05)
+        for: 2m
+        labels:
+          severity: page
+          slo: api_latency
+        annotations:
+          summary: "ApiLatency is burning its error budget 14.4x too fast"
+          description: >-
+            The share of control plane requests slower than 0.5s was {{ $value | humanizePercentage }} over the last 1h and is still
+            above 14.4 * 0.05 over 5m. The 95% objective allows 5%. At this
+            rate the 30 day error budget is used up in about 2 days.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-latency.md
+      - alert: ApiLatencySlowBurn
+        expr: |
+          slo:api_slow_ratio:rate6h > (6 * 0.05)
+          and
+          slo:api_slow_ratio:rate30m > (6 * 0.05)
+        for: 15m
+        labels:
+          severity: page
+          slo: api_latency
+        annotations:
+          summary: "ApiLatency is burning its error budget 6x too fast"
+          description: >-
+            The share of control plane requests slower than 0.5s was {{ $value | humanizePercentage }} over the last 6h and is still
+            above 6 * 0.05 over 30m. The 95% objective allows 5%. At this
+            rate the 30 day error budget is used up in about 5 days.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-latency.md
+      - alert: ApiLatencyBudgetLeak
+        expr: |
+          slo:api_slow_ratio:rate1d > (3 * 0.05)
+          and
+          slo:api_slow_ratio:rate2h > (3 * 0.05)
+        for: 1h
+        labels:
+          severity: ticket
+          slo: api_latency
+        annotations:
+          summary: "ApiLatency is burning its error budget 3x too fast"
+          description: >-
+            The share of control plane requests slower than 0.5s was {{ $value | humanizePercentage }} over the last 1d and is still
+            above 3 * 0.05 over 2h. The 95% objective allows 5%. At this
+            rate the 30 day error budget is used up in about 10 days.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-latency.md
+      - alert: ApiLatencyBudgetDrift
+        expr: |
+          slo:api_slow_ratio:rate3d > (1 * 0.05)
+          and
+          slo:api_slow_ratio:rate6h > (1 * 0.05)
+        for: 3h
+        labels:
+          severity: ticket
+          slo: api_latency
+        annotations:
+          summary: "ApiLatency is burning its error budget 1x too fast"
+          description: >-
+            The share of control plane requests slower than 0.5s was {{ $value | humanizePercentage }} over the last 3d and is still
+            above 1 * 0.05 over 6h. The 95% objective allows 5%. At this
+            rate the 30 day error budget is used up in the full 30 days, so it is only just within budget.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/api-latency.md
+
+  - name: cause_based
+    rules:
+      - alert: ControlPlaneDown
+        expr: up{job="control-plane"} == 0
+        for: 1m
+        labels:
+          severity: page
+          slo: api_availability
+        annotations:
+          summary: "The control plane is not being scraped"
+          description: >-
+            Prometheus has not reached the control plane's /metrics for 1 minute. It is down, or
+            unreachable from Prometheus. No requests are being served, so the availability ratio
+            has nothing to measure and will not alert on its own.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/service-down.md
+
+      - alert: WorkerDown
+        expr: up{job="worker"} == 0
+        for: 2m
+        labels:
+          severity: page
+          slo: pipeline_execution
+        annotations:
+          summary: "The worker is not being scraped"
+          description: >-
+            Prometheus has not reached the worker's /metrics on port 8001 for 2 minutes. Queued runs
+            are not being picked up while it is down.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/service-down.md
+
+      - alert: DiagnosisCoverageLow
+        expr: |
+          slo:diagnosis_miss_ratio:rate6h > (6 * 0.05)
+          and
+          sum(increase(pipeline_runs_total{status="failed"}[6h])) >= 5
+        for: 30m
+        labels:
+          severity: ticket
+          slo: diagnosis_coverage
+        annotations:
+          summary: "Many failed runs are not getting a recommendation"
+          description: >-
+            {{ $value | humanizePercentage }} of failed runs over the last 6 hours got no
+            recommendation, against an objective of 95% covered. The check needs at least 5 failed
+            runs in the window, since this indicator has low volume.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/diagnosis-coverage.md
+
+      - alert: PipelineFailureRateHigh
+        expr: |
+          (
+            sum(rate(pipeline_runs_total{status="failed"}[30m]))
+            /
+            sum(rate(pipeline_runs_total[30m]))
+          ) > 0.5
+          and
+          sum(increase(pipeline_runs_total[30m])) >= 10
+        for: 10m
+        labels:
+          severity: ticket
+          slo: pipeline_execution
+        annotations:
+          summary: "More than half of recent pipeline runs are failing"
+          description: >-
+            {{ $value | humanizePercentage }} of pipeline runs failed over the last 30 minutes.
+            This counts every failure, including ones caused by a customer's data source, so
+            check the failure classifications before assuming the platform is at fault.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/pipeline-failures.md
+
+      - alert: CircuitBreakersOpening
+        expr: sum(increase(circuit_breaker_transitions_total{to_state="open"}[15m])) >= 3
+        labels:
+          severity: ticket
+          slo: pipeline_execution
+        annotations:
+          summary: "Several pipeline circuit breakers opened recently"
+          description: >-
+            {{ $value }} circuit breakers opened in the last 15 minutes. Runs for those
+            pipelines are being blocked until the breakers close.
+          runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/pipeline-failures.md

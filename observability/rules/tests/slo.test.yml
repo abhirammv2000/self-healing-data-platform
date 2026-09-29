@@ -1,0 +1,242 @@
+# Unit tests for the SLO recording rules and alerts. No running stack needed:
+#
+#   promtool test rules observability/rules/tests/slo.test.yml
+#
+# Each test feeds synthetic series through the real rule files and checks what
+# fires. Series step once a minute. Error budgets are 0.5% for availability
+# (99.5%) and 5% for latency (95%), so a burn rate of N means a bad ratio of
+# N * budget: the fast alert needs 14.4x (7.2% bad requests), the slow one 6x
+# (3%).
+
+rule_files:
+  - ../slo.rules.yml
+  - ../slo.alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: availability, a steady 10% error rate pages on the fast burn
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="2xx"}'
+        values: '0+90x180'
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="5xx"}'
+        values: '0+10x180'
+    promql_expr_test:
+      - expr: round(slo:api_error_ratio:rate5m, 0.001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0.1
+      - expr: ALERTS{alertname="ApiAvailabilityFastBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ApiAvailabilityFastBurn", alertstate="firing", severity="page", slo="api_availability"}'
+            value: 1
+      - expr: ALERTS{alertname="ApiAvailabilitySlowBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ApiAvailabilitySlowBurn", alertstate="firing", severity="page", slo="api_availability"}'
+            value: 1
+
+  - name: availability, errors under the budget rate never alert
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="2xx"}'
+        values: '0+998x240'
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="5xx"}'
+        values: '0+2x240'
+    promql_expr_test:
+      - expr: ALERTS{slo="api_availability", alertstate="firing"}
+        eval_time: 200m
+        exp_samples: []
+
+  - name: availability, a burn rate of 8 pages the slow alert but not the fast one
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="2xx"}'
+        values: '0+96x180'
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="5xx"}'
+        values: '0+4x180'
+    promql_expr_test:
+      - expr: ALERTS{alertname="ApiAvailabilityFastBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples: []
+      - expr: ALERTS{alertname="ApiAvailabilitySlowBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ApiAvailabilitySlowBurn", alertstate="firing", severity="page", slo="api_availability"}'
+            value: 1
+
+  - name: availability, the fast alert stops once the short window is clean again
+    interval: 1m
+    input_series:
+      # 10% errors for the first 40 minutes, then none.
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="2xx"}'
+        values: '0+90x40 3600+100x60'
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="5xx"}'
+        values: '0+10x40 400+0x60'
+    promql_expr_test:
+      - expr: ALERTS{alertname="ApiAvailabilityFastBurn", alertstate="firing"}
+        eval_time: 38m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ApiAvailabilityFastBurn", alertstate="firing", severity="page", slo="api_availability"}'
+            value: 1
+      # The 1h window still holds most of the errors (about 9% bad), but the 5m window is clean.
+      - expr: slo:api_error_ratio:rate1h > bool (14.4 * 0.005)
+        eval_time: 45m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: ALERTS{alertname="ApiAvailabilityFastBurn", alertstate="firing"}
+        eval_time: 45m
+        exp_samples: []
+
+  - name: availability, prometheus scraping /metrics does not dilute the error ratio
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="2xx"}'
+        values: '0+90x30'
+      - series: 'http_requests_total{job="control-plane", handler="/tenants", method="GET", status="5xx"}'
+        values: '0+10x30'
+      # A flood of successful scrapes that would drag the ratio to near zero if counted.
+      - series: 'http_requests_total{job="control-plane", handler="/metrics", method="GET", status="2xx"}'
+        values: '0+5000x30'
+    promql_expr_test:
+      - expr: round(slo:api_error_ratio:rate5m, 0.001)
+        eval_time: 20m
+        exp_samples:
+          - labels: '{}'
+            value: 0.1
+
+  - name: latency, 90% of requests over 0.5s pages the fast burn
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="control-plane", handler="/tenants", method="GET", le="0.5"}'
+        values: '0+10x180'
+      - series: 'http_request_duration_seconds_count{job="control-plane", handler="/tenants", method="GET"}'
+        values: '0+100x180'
+    promql_expr_test:
+      - expr: round(slo:api_slow_ratio:rate5m, 0.001)
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0.9
+      - expr: ALERTS{alertname="ApiLatencyFastBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ApiLatencyFastBurn", alertstate="firing", severity="page", slo="api_latency"}'
+            value: 1
+
+  - name: latency, 40% slow requests page the slow burn but not the fast one
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="control-plane", handler="/tenants", method="GET", le="0.5"}'
+        values: '0+60x180'
+      - series: 'http_request_duration_seconds_count{job="control-plane", handler="/tenants", method="GET"}'
+        values: '0+100x180'
+    promql_expr_test:
+      - expr: ALERTS{alertname="ApiLatencyFastBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples: []
+      - expr: ALERTS{alertname="ApiLatencySlowBurn", alertstate="firing"}
+        eval_time: 90m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ApiLatencySlowBurn", alertstate="firing", severity="page", slo="api_latency"}'
+            value: 1
+
+  - name: latency, requests inside the target never alert
+    interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="control-plane", handler="/tenants", method="GET", le="0.5"}'
+        values: '0+99x240'
+      - series: 'http_request_duration_seconds_count{job="control-plane", handler="/tenants", method="GET"}'
+        values: '0+100x240'
+    promql_expr_test:
+      - expr: ALERTS{slo="api_latency", alertstate="firing"}
+        eval_time: 200m
+        exp_samples: []
+
+  - name: the worker going away pages after two minutes, with the runbook attached
+    interval: 1m
+    input_series:
+      - series: 'up{job="worker"}'
+        values: '1 1 1 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: WorkerDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: WorkerDown
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              slo: pipeline_execution
+              job: worker
+            exp_annotations:
+              summary: "The worker is not being scraped"
+              description: "Prometheus has not reached the worker's /metrics on port 8001 for 2 minutes. Queued runs are not being picked up while it is down."
+              runbook_url: https://github.com/abhirammv2000/self-healing-data-platform/blob/main/docs/runbooks/service-down.md
+
+  - name: the control plane going away pages after one minute
+    interval: 1m
+    input_series:
+      - series: 'up{job="control-plane"}'
+        values: '1 1 0 0 0 0'
+    promql_expr_test:
+      - expr: ALERTS{alertname="ControlPlaneDown", alertstate="firing"}
+        eval_time: 5m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ControlPlaneDown", alertstate="firing", job="control-plane", severity="page", slo="api_availability"}'
+            value: 1
+
+  - name: diagnosis, half of failed runs going undiagnosed opens a ticket
+    interval: 1m
+    input_series:
+      - series: 'pipeline_runs_total{status="failed"}'
+        values: '0+1x300'
+      - series: 'diagnostic_agent_recommendations_total{action="escalate"}'
+        values: '0+0.3x300'
+    promql_expr_test:
+      - expr: ALERTS{alertname="DiagnosisCoverageLow", alertstate="firing"}
+        eval_time: 120m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DiagnosisCoverageLow", alertstate="firing", severity="ticket", slo="diagnosis_coverage"}'
+            value: 1
+
+  - name: diagnosis, full coverage never alerts
+    interval: 1m
+    input_series:
+      - series: 'pipeline_runs_total{status="failed"}'
+        values: '0+1x300'
+      - series: 'diagnostic_agent_recommendations_total{action="escalate"}'
+        values: '0+1x300'
+    promql_expr_test:
+      - expr: ALERTS{alertname="DiagnosisCoverageLow", alertstate="firing"}
+        eval_time: 200m
+        exp_samples: []
+
+  - name: diagnosis, a handful of failures is too few to judge
+    interval: 1m
+    input_series:
+      # Two failures in six hours, neither diagnosed: a 100% miss ratio, but not enough volume.
+      - series: 'pipeline_runs_total{status="failed"}'
+        values: '0 0 0 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2 2'
+      - series: 'diagnostic_agent_recommendations_total{action="escalate"}'
+        values: '0x60'
+    promql_expr_test:
+      - expr: ALERTS{alertname="DiagnosisCoverageLow", alertstate="firing"}
+        eval_time: 59m
+        exp_samples: []
+
+  - name: several breakers opening at once opens a ticket
+    interval: 1m
+    input_series:
+      - series: 'circuit_breaker_transitions_total{to_state="open"}'
+        values: '0 0 0 1 2 3 3 3'
+    promql_expr_test:
+      - expr: ALERTS{alertname="CircuitBreakersOpening", alertstate="firing"}
+        eval_time: 7m
+        exp_samples:
+          - labels: 'ALERTS{alertname="CircuitBreakersOpening", alertstate="firing", severity="ticket", slo="pipeline_execution"}'
+            value: 1

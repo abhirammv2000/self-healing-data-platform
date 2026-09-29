@@ -28,3 +28,28 @@ jobs:
         # needed. conftest.py sets fake env vars before any app module is imported,
         # since a few modules build DB engines/API clients at import time.
         run: pytest tests -v
+
+  alerting-rules:
+    name: Alerting rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the Prometheus and Alertmanager config
+        run: |
+          docker run --rm -v "$PWD/observability:/o:ro" --entrypoint /bin/promtool \
+            prom/prometheus:v3.13.3 check config /o/prometheus.yml
+          docker run --rm -v "$PWD/observability:/o:ro" --entrypoint /bin/promtool \
+            prom/prometheus:v3.13.3 check rules /o/rules/slo.rules.yml /o/rules/slo.alerts.yml
+          docker run --rm -v "$PWD/observability:/o:ro" --entrypoint /bin/amtool \
+            prom/alertmanager:v0.34.1 check-config /o/alertmanager.yml
+
+      - name: Unit test the alert rules
+        # Feeds synthetic series through the real rule files and checks what
+        # fires. No running stack needed.
+        run: |
+          docker run --rm -v "$PWD/observability:/o:ro" --entrypoint /bin/promtool \
+            prom/prometheus:v3.13.3 test rules /o/rules/tests/slo.test.yml
+
+      - name: Check the Grafana dashboard is valid JSON
+        run: python -m json.tool observability/grafana/dashboards/shdp-slo.json > /dev/null

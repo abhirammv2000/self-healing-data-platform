@@ -1,6 +1,16 @@
 global:
   scrape_interval: 5s
 
+# Recording rules and alerts for the SLOs in docs/SLOs.md. The tests are in
+# rules/tests and are not loaded here, only the top-level files.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   # the control plane runs on the host (uvicorn, not containerized), so Prometheus reaches it
   # via host.docker.internal, wired up in docker-compose.yml's extra_hosts for this service.

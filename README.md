@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/abhirammv2000/self-healing-data-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/abhirammv2000/self-healing-data-platform/actions/workflows/ci.yml)
 
-> **Status: working end to end, including on AWS.** The control plane, worker/executor, and the LangGraph diagnostic agent with pgvector RAG are built and working end to end, covered by 59 unit tests in CI and a 33-case labeled evaluation harness (90.9% classification accuracy, 84.8% recommended-action accuracy; see [Agent evaluation harness](#agent-evaluation-harness)). It's also been deployed to a real AWS EKS cluster via Terraform and Helm, checked, then torn down; see [Infra: AWS EKS deployment](#infra-aws-eks-deployment) below. There's no cluster running by default, local dev uses Docker Compose.
+> **Status: working end to end, including on AWS.** The control plane, worker/executor, and the LangGraph diagnostic agent with pgvector RAG are built and working end to end, covered by 62 unit tests in CI and a 33-case labeled evaluation harness (90.9% classification accuracy, 84.8% recommended-action accuracy; see [Agent evaluation harness](#agent-evaluation-harness)). It's also been deployed to a real AWS EKS cluster via Terraform and Helm, checked, then torn down; see [Infra: AWS EKS deployment](#infra-aws-eks-deployment) below. There's no cluster running by default, local dev uses Docker Compose.
 
 A multi-tenant, event-driven data pipeline orchestration platform with an LLM-powered diagnostic layer. Pipelines are defined and managed through a REST control plane, executed asynchronously by a queue-driven worker with built-in resilience (retries, circuit breaking). When a run fails, a LangGraph multi-agent system classifies the failure, retrieves relevant operational context via RAG, and recommends a recovery action for operator review.
 
@@ -322,6 +322,7 @@ docker compose up -d   # starts Jaeger (:16686), Prometheus (:9090), and Grafana
 - **Structured logging**: every `print()` in `worker/` and `shared/` (25 of them) was replaced with structured, JSON-rendered log calls via `structlog`. A custom processor stamps the *active span's* `trace_id`/`span_id` onto every log line. In one run, every log line shared the same `trace_id`, with different `span_id`s as execution moved between the pipeline-step span and the diagnostic-agent span, which is the point of combining the two tools.
 - **Metrics** (`shared/metrics.py`): `prometheus-fastapi-instrumentator` gives the control plane automatic HTTP metrics at `/metrics`. Custom domain counters (`pipeline_runs_total`, `pipeline_run_duration_seconds`, `diagnostic_agent_classifications_total`, `diagnostic_agent_recommendations_total`, `circuit_breaker_transitions_total`) are incremented in the worker. `prometheus_client` metrics are per-process, so the worker's counters never reached the control plane's `/metrics` until the worker got its own scrape target (`start_http_server(8001)`, a second `prometheus.yml` job); confirmed by querying Prometheus before the fix (empty) and after (populated, both targets `up`).
 - **Grafana** (`:3001`, anonymous admin access, local dev only) comes up with Prometheus and Jaeger pre-provisioned as datasources (`observability/grafana/provisioning/`), no manual setup.
+- **SLOs and alerts** ([docs/SLOs.md](docs/SLOs.md)): three objectives (API availability 99.5%, API latency 95% under 0.5s, and 95% of failed runs getting a recommendation), with multi-window burn-rate alerts, Alertmanager, a provisioned Grafana dashboard, and a runbook for each alert in [docs/runbooks/](docs/runbooks/). The rules have promtool unit tests (`promtool test rules observability/rules/tests/slo.test.yml`) that feed synthetic series through the real rule files, run in CI. I also ran the real Prometheus and Alertmanager against a stand-in service returning 50% errors and watched the alerts go from pending to firing and arrive at a webhook. The thresholds have not been tuned against real traffic.
 
 ---
 
@@ -339,7 +340,7 @@ Past-incident rows are indexed automatically by the agent after each failed run;
 
 ## Testing
 
-**Automated: 59 unit tests, run in CI on every push.**
+**Automated: 62 unit tests, run in CI on every push.**
 
 ```bash
 pip install -r requirements-dev.txt
@@ -398,7 +399,7 @@ A few principles applied consistently across the codebase:
 
 ## Roadmap
 
-Built so far: the full control plane, the worker/executor with retries + circuit breaking + webhooks, the complete LangGraph multi-agent diagnostic system with pgvector RAG and tool calling, 59 unit tests in CI, a 33-case labeled evaluation harness scored against live Gemini calls (see [Agent evaluation harness](#agent-evaluation-harness) above), an OpenTelemetry + Prometheus + Grafana observability stack (see [Observability](#observability) above), and Terraform + Helm for a real AWS EKS deployment (see [Infra: AWS EKS deployment](#infra-aws-eks-deployment) below).
+Built so far: the full control plane, the worker/executor with retries + circuit breaking + webhooks, the complete LangGraph multi-agent diagnostic system with pgvector RAG and tool calling, 62 unit tests in CI, a 33-case labeled evaluation harness scored against live Gemini calls (see [Agent evaluation harness](#agent-evaluation-harness) above), an OpenTelemetry + Prometheus + Grafana observability stack with SLOs, burn-rate alerting and runbooks (see [Observability](#observability) above), and Terraform + Helm for a real AWS EKS deployment (see [Infra: AWS EKS deployment](#infra-aws-eks-deployment) below).
 
 Planned next:
 

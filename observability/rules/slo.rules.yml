@@ -1,0 +1,201 @@
+# Recording rules for the service level indicators in docs/SLOs.md.
+#
+# Each SLI is written as a "bad ratio" (bad events / all events) at several
+# windows, because the burn-rate alerts in slo.alerts.yml compare a long and a
+# short window of the same ratio. Recording them once keeps the alert
+# expressions short and cheap to evaluate.
+#
+# Prometheus's own scrape of /metrics is excluded from the HTTP indicators. It
+# arrives every few seconds, always succeeds, and would make the service look
+# healthier than it is.
+groups:
+  # API errors: share of control plane requests that returned 5xx.
+  - name: api_error_ratio:rules
+    rules:
+      - record: slo:api_error_ratio:rate5m
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[5m]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[5m]))
+      - record: slo:api_error_ratio:rate30m
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[30m]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[30m]))
+      - record: slo:api_error_ratio:rate1h
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[1h]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[1h]))
+      - record: slo:api_error_ratio:rate2h
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[2h]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[2h]))
+      - record: slo:api_error_ratio:rate6h
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[6h]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[6h]))
+      - record: slo:api_error_ratio:rate1d
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[1d]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[1d]))
+      - record: slo:api_error_ratio:rate3d
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[3d]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[3d]))
+      - record: slo:api_error_ratio:rate30d
+        expr: |
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics", status="5xx"}[30d]))
+          /
+          sum(rate(http_requests_total{job="control-plane", handler!="/metrics"}[30d]))
+
+  # API latency: share of requests slower than 0.5s. The 0.5 bucket is the largest
+  # le boundary at or below the target in the instrumentator's default buckets (0.1, 0.5, 1.0).
+  - name: api_slow_ratio:rules
+    rules:
+      - record: slo:api_slow_ratio:rate5m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[5m]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[5m]))
+          )
+      - record: slo:api_slow_ratio:rate30m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[30m]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[30m]))
+          )
+      - record: slo:api_slow_ratio:rate1h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[1h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[1h]))
+          )
+      - record: slo:api_slow_ratio:rate2h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[2h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[2h]))
+          )
+      - record: slo:api_slow_ratio:rate6h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[6h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[6h]))
+          )
+      - record: slo:api_slow_ratio:rate1d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[1d]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[1d]))
+          )
+      - record: slo:api_slow_ratio:rate3d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[3d]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[3d]))
+          )
+      - record: slo:api_slow_ratio:rate30d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="control-plane", handler!="/metrics", le="0.5"}[30d]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="control-plane", handler!="/metrics"}[30d]))
+          )
+
+  # Diagnosis coverage: share of failed runs that did not get a recommendation.
+  # Sentinel recommendations (a degraded agent escalating) count as a recommendation,
+  # because the operator still gets something to act on.
+  - name: diagnosis_miss_ratio:rules
+    rules:
+      - record: slo:diagnosis_miss_ratio:rate5m
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[5m]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[5m]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate30m
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[30m]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[30m]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate1h
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[1h]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[1h]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate2h
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[2h]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[2h]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate6h
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[6h]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[6h]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate1d
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[1d]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[1d]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate3d
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[3d]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[3d]))
+            ),
+            0
+          )
+      - record: slo:diagnosis_miss_ratio:rate30d
+        expr: |
+          clamp_min(
+            1 - (
+              sum(rate(diagnostic_agent_recommendations_total[30d]))
+              /
+              sum(rate(pipeline_runs_total{status="failed"}[30d]))
+            ),
+            0
+          )

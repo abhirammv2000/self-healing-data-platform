@@ -31,12 +31,31 @@ services:
   prometheus:
     image: prom/prometheus:v3.13.3
     restart: always
+    # The default arguments plus 35 days of retention, so the 30 day SLO windows in
+    # observability/rules have data to look at.
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=35d
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/rules:/etc/prometheus/rules:ro
+      - promdata:/prometheus
     ports:
       - "9090:9090"   # Prometheus UI / query API
     # host.docker.internal lets the container reach the control plane running on the host
     # (uvicorn, started outside Docker); see observability/prometheus.yml's scrape target.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    restart: always
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"   # Alertmanager UI / API
+    # Alerts are posted to a receiver on the host, see scripts/alert_receiver.py.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -49,6 +68,7 @@ services:
       - GF_AUTH_DISABLE_LOGIN_FORM=true
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3001:3000"   # Grafana UI (3000 is already the ad-pulse-style default elsewhere, so mapped to 3001 on the host)
     depends_on:
@@ -57,4 +77,5 @@ services:
 
 volumes:
   pgdata:
+  promdata:
 

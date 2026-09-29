@@ -1,0 +1,34 @@
+# Where alerts go. For local development they are posted as JSON to a small
+# receiver on the host (scripts/alert_receiver.py). A real deployment would point
+# these at a paging service and a ticket queue.
+#
+# Alerts with severity "page" are for a person to look at now; "ticket" can wait
+# for working hours. See docs/SLOs.md.
+route:
+  receiver: local-webhook
+  group_by: [alertname, slo]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="page"]
+      receiver: local-webhook
+      repeat_interval: 1h
+    - matchers: [severity="ticket"]
+      receiver: local-webhook
+      repeat_interval: 12h
+
+receivers:
+  - name: local-webhook
+    webhook_configs:
+      - url: http://host.docker.internal:9094/alerts
+        send_resolved: true
+
+inhibit_rules:
+  # If the control plane is down, the availability burn alerts add nothing.
+  - source_matchers: [alertname="ControlPlaneDown"]
+    target_matchers: [alertname=~"ApiAvailability.*"]
+  # A page for an SLO makes a ticket for the same SLO redundant.
+  - source_matchers: [severity="page"]
+    target_matchers: [severity="ticket"]
+    equal: [slo]
