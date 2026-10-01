@@ -1,29 +1,25 @@
-"""Runs the labeled cases in eval/cases.py through the REAL classification_node
-and recovery_planning_node (real Gemini calls, real cost; see eval/cases.py's
-module docstring for what this does and doesn't cover).
+"""Runs the labeled cases in eval/cases.py through the real classification_node and
+recovery_planning_node. These are real Gemini calls and they cost money. See
+eval/cases.py for what this does and doesn't cover.
 
-Usage (run from the project root, so python-dotenv finds .env there):
+Run it from the project root so python-dotenv finds .env:
     python -m eval.run_eval
 
-Requires a real GOOGLE_API_KEY in .env. Does NOT import diagnostic_agent.py or
-shared/db.py, and never touches a database. Only nodes.py's two LLM nodes are
-exercised directly, with each case's own hand-authored log_analysis and
-retrieved_context standing in for what the earlier graph nodes would have
-produced.
+It needs a real GOOGLE_API_KEY in .env. It does not import diagnostic_agent.py or
+shared/db.py and never touches a database. Only the two LLM nodes in nodes.py run, with
+each case's hand-written log_analysis and retrieved_context standing in for the earlier
+graph nodes.
 
-What this script does, per case:
-  1. Run classification_node with the case's log_analysis fixture.
-  2. Run recovery_planning_node with that classification + the case's own
-     retrieved_context (empty for most cases).
-  3. For the 3 cases in RETRIEVAL_ABLATION_CASE_IDS only, also re-run
-     recovery_planning_node with retrieved_context forced to []. This is the
-     ablation; nothing else is re-run twice, since classification_node never
-     reads retrieved_context and re-running it would just burn calls to get
-     the same answer twice.
+For each case it:
+  1. runs classification_node with the case's log_analysis
+  2. runs recovery_planning_node with that classification and the case's retrieved_context
+  3. for the 3 cases in RETRIEVAL_ABLATION_CASE_IDS only, runs recovery_planning_node
+     again with retrieved_context set to []. That is the ablation. Classification never
+     reads retrieved_context, so it is not run twice.
 
-Scoring is against gold_classification / gold_action strictly, and separately
-against the acceptable_alternate_* fields leniently, both reported. See
-eval/cases.py's EvalCase docstring for why a few cases carry an alternate.
+Scoring is strict against gold_classification and gold_action, and lenient against the
+acceptable_alternate_* fields. Both are reported. A few cases carry an alternate answer,
+explained in the EvalCase docstring.
 """
 import asyncio
 import json

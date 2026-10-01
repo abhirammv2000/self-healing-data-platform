@@ -1,7 +1,6 @@
-"""get_circuit_breaker_state (tools.py) is the one real tool the diagnostic
-agent can call. Tested here as a plain async function via its .ainvoke()
-interface, independent of whether or when the model decides to call it
-(that decision logic is tested in test_nodes.py instead).
+"""get_circuit_breaker_state (in tools.py) is the one real tool the diagnostic agent can
+call. It is tested here as a plain async function through .ainvoke(), apart from whether
+the model decides to call it. That decision is tested in test_nodes.py.
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock

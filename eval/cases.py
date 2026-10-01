@@ -1,44 +1,30 @@
-"""Labeled failure cases for the diagnostic agent's classification and
-recovery-planning eval (see eval/run_eval.py).
+"""Hand-labeled failure cases for the agent evaluation (see eval/run_eval.py).
 
-Scope: this evaluates classification_node and recovery_planning_node only,
-not log_analysis_node. Those two have categorical outputs that can be scored
-against a gold label, and they drive the automated behavior an operator sees
-(the classification feeds the recommendation, which an operator applies or
-dismisses). log_analysis_node's output is open-ended prose with no crisp gold
-label to score, so each case below supplies a hand-authored LogAnalysisOutput
-fixture standing in for it, the way a unit test supplies a fixture instead of
-exercising the whole pipeline. Scoring log_analysis's own descriptive quality
-would need a different method (an LLM-as-judge rubric) and is future work.
+This scores classification_node and recovery_planning_node only, not log_analysis_node.
+Those two give a category you can check against a label, and they decide what an operator
+sees. log_analysis_node writes free text with no clean label, so each case has a
+hand-written LogAnalysisOutput standing in for it. Scoring that text would need an LLM
+judge, which is future work.
 
-This also can't run the real retrieval_node against pgvector, since no
-incident/runbook corpus is indexed in this environment. Each case instead
-supplies its own hand-authored `retrieved_context`, empty for most cases,
-with a specific runbook or past-incident chunk for the cases in
-RETRIEVAL_ABLATION_CASE_IDS. run_eval.py runs every case twice, once with its
-given retrieved_context and once with an empty list. If retrieval earns its
-place in the graph, the ablation cases should show a measurable accuracy or
-grounding difference between the two runs; the rest of the cases are the
-control group and shouldn't move much either way.
+The real retrieval_node can't run here either, because no runbooks or incidents are
+indexed in this setup. Each case carries its own hand-written retrieved_context instead.
+It is empty for most cases. The cases in RETRIEVAL_ABLATION_CASE_IDS have a specific
+runbook or past incident chunk. run_eval.py runs every case twice, once with its context
+and once with an empty list. If retrieval helps, the ablation cases should differ between
+the two runs and the others should not.
 
-Every error_type/error_message pattern below is grounded in an exception this
-codebase actually raises; see worker/app/step_handlers.py and the httpx call
-in run_ingestion's fetch_data(). Two categories go beyond what
-step_handlers.py can currently produce, noted per case below:
+Every error pattern below comes from an exception this codebase raises (see
+worker/app/step_handlers.py and the httpx call in run_ingestion's fetch_data()). Two kinds
+of case go past what step_handlers.py produces today:
 
-- partial_load cases assume a load-step error message granular enough to say
-  how many rows were written before the failure. run_load's current except
-  clause catches any exception from df.to_sql() uniformly and never
-  distinguishes "wrote 0 rows" from "wrote some rows then failed partway," so
-  in production today the classifier has no evidence to ever reach
-  partial_load. These cases test whether the model can recognize the
-  category given the right signal, ahead of the separate work of making
-  step_handlers.py produce that signal.
-- the two "config bug" cases (unknown source_url, missing ingestion output)
-  are pipeline-definition errors, not data failures. None of the five
-  classification categories fit them well; that gap is itself the finding.
-  The taxonomy assumes something went wrong with the data, not that the
-  pipeline was misconfigured.
+- partial_load cases assume a load error that says how many rows were written before it
+  failed. run_load catches every df.to_sql() error the same way and never tells "wrote 0
+  rows" from "wrote some rows", so in production the classifier can't reach partial_load
+  yet. These cases test whether the model can spot the category when given the right
+  signal.
+- The two "config bug" cases (unknown source_url, missing ingestion output) are pipeline
+  setup mistakes, not data failures. None of the five categories fits them well, and that
+  gap is a finding in itself.
 """
 from dataclasses import dataclass, field
 from typing import Literal
@@ -93,7 +79,7 @@ def chunk(source_type, source_ref, text, score):
 
 CASES: list[EvalCase] = [
 
-    # ---- network: transient (timeouts, resets, 5xx) -> retry_with_backoff ----
+    # network: transient (timeouts, resets, 5xx) -> retry_with_backoff
     EvalCase(
         id="net-connect-timeout-first-attempt",
         error_type="IngestionStepError",
@@ -132,7 +118,7 @@ CASES: list[EvalCase] = [
         notes="5xx is explicitly called out in the recovery prompt as the transient case.",
     ),
 
-    # ---- network: looks permanent (4xx, DNS, bad URL) -> pause_schedule ----
+    # network: looks permanent (4xx, DNS, bad URL) -> pause_schedule
     EvalCase(
         id="net-404-moved-endpoint",
         error_type="IngestionStepError",
@@ -162,7 +148,7 @@ CASES: list[EvalCase] = [
         notes="A retry can't fix expired credentials; someone has to rotate them. escalate is also defensible here, so this case scores partial credit if the model picks escalate instead of pause_schedule.",
     ),
 
-    # ---- quota: 429 / throttling -> retry_with_backoff ----
+    # quota: 429 / throttling -> retry_with_backoff
     EvalCase(
         id="quota-429-explicit",
         error_type="IngestionStepError",
@@ -200,7 +186,7 @@ CASES: list[EvalCase] = [
         notes="Standard concurrency throttling. Backoff resolves this without waiting for a fixed reset window, unlike the daily-quota case above.",
     ),
 
-    # ---- schema: missing/null columns -> schema_evolution when plausible, escalate when not ----
+    # schema: missing/null columns -> schema_evolution when plausible, escalate when not
     EvalCase(
         id="schema-missing-optional-looking-column",
         error_type="ValidationStepError",
@@ -266,7 +252,7 @@ CASES: list[EvalCase] = [
         notes="This is the cleanest schema_evolution case at the load step. The existing warehouse table's column type needs to widen (integer to numeric), exactly the kind of schema change that action describes.",
     ),
 
-    # ---- config bugs: don't fit any category well (the taxonomy gap) ----
+    # config bugs: don't fit any category well (the taxonomy gap)
     EvalCase(
         id="config-missing-source-url",
         error_type="IngestionStepError",
@@ -297,7 +283,7 @@ CASES: list[EvalCase] = [
         notes="Signals an executor/orchestration bug, not a data problem; the pipeline's own step sequencing broke. Nothing about retrying or evolving a schema addresses this.",
     ),
 
-    # ---- partial_load: beyond current step_handlers.py granularity, see module docstring ----
+    # partial_load: beyond current step_handlers.py granularity, see module docstring
     EvalCase(
         id="partial-load-constraint-violation-midbatch",
         error_type="LoadStepError",
@@ -326,7 +312,7 @@ CASES: list[EvalCase] = [
         notes="Paired with the two partial_load cases above: same step (load), but a connection refusal with zero evidence of a partial write is plainly network, not partial_load. Tests that the model doesn't over-apply partial_load to every load-step failure just because it's the load step.",
     ),
 
-    # ---- unknown: genuinely ambiguous / generic ----
+    # unknown: genuinely ambiguous / generic
     EvalCase(
         id="unknown-bare-keyerror",
         error_type="KeyError",
@@ -356,7 +342,7 @@ CASES: list[EvalCase] = [
         notes="Tests whether the model classifies based on the failure that ended the run (a downstream schema error) rather than anchoring on an earlier, already-resolved quota blip mentioned in the same context.",
     ),
 
-    # ---- degraded upstream (log_analysis_failed sentinel) -> should lean unknown/escalate regardless of raw error ----
+    # degraded upstream (log_analysis_failed sentinel) -> should lean unknown/escalate regardless of raw error
     EvalCase(
         id="degraded-log-analysis-on-what-would-be-clean-network-error",
         error_type="ConnectTimeout",

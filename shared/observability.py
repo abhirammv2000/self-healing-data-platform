@@ -1,18 +1,17 @@
-"""Tracing (OpenTelemetry) and structured logging (structlog), wired together
-so every log line emitted while a trace is active carries that trace's
-trace_id and span_id. That's what makes "trace correlation" useful as a
-production practice.
+"""Tracing (OpenTelemetry) and structured logging (structlog), set up so every log line
+written during a trace carries that trace's trace_id and span_id.
 
-Everything here is local and free: spans export to the Jaeger container in
-docker-compose.yml via OTLP gRPC (port 4317), no vendor, no API key, no cost.
-Tested against opentelemetry-sdk==1.44.0 / structlog==26.1.0 in this
-environment before writing this file, since API details can vary by version.
+Everything is local and free. Spans go over OTLP gRPC (port 4317) to the Jaeger container
+in docker-compose.yml, with no vendor and no API key. I tested it against
+opentelemetry-sdk==1.44.0 and structlog==26.1.0 before writing it, since the API changes
+between versions.
 
-Two entry points, called once each at process startup:
-  setup_tracing(service_name)  in control_plane/app/main.py and worker/app/main.py
-  setup_logging()              in the same two places
+Two entry points, each called once at startup in control_plane/app/main.py and
+worker/app/main.py:
+  setup_tracing(service_name)
+  setup_logging()
 
-get_logger(name) is what the rest of the codebase imports to replace print().
+The rest of the code uses get_logger(name) instead of print().
 """
 from __future__ import annotations
 

@@ -1,16 +1,13 @@
-"""Tool-calling for the recovery-planning node: a callable the model can
-invoke to check a pipeline's live circuit breaker state before recommending
-retry_with_backoff or pause_schedule.
+"""Tool calling for the recovery-planning node. It gives the model a function to check a
+pipeline's live circuit breaker state before recommending retry_with_backoff or
+pause_schedule.
 
-The recovery-planning prompt already has the classification and retrieved
-past incidents, but neither tells it whether THIS pipeline's circuit breaker
-is already open, or how close it is to tripping. That's live operational
-state, which similarity search can't retrieve, so it needs a tool call
-instead of more context stuffing.
+The prompt already has the classification and past incidents, but neither says whether
+this pipeline's breaker is already open or close to opening. That is live state that
+similarity search can't find, so it needs a tool call and not more context.
 
-Defensive posture matches every other LLM/DB touchpoint in this agent: a
-DB error here returns a descriptive string rather than raising, so a broken
-tool call degrades the recommendation's grounding, not the whole node.
+Like the other LLM and DB calls in this agent, a DB error returns a message string instead
+of raising. A broken tool call weakens the recommendation but doesn't break the node.
 """
 from langchain_core.tools import tool
 from sqlalchemy import select

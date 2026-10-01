@@ -1,11 +1,9 @@
-"""Sentinel outputs are what the graph falls back to when an LLM node fails.
-worker/app/agent/nodes.py returns these instead of propagating an exception,
-so it's worth locking down exactly what they contain. In particular:
-recovery_plan_sentinel() must always be 'escalate' (the safe default when the
-agent can't reason about a failure), and classification_sentinel() must be
-'unknown' with confidence 0.0 (the signal recovery planning uses to lean
-toward escalate). If either drifted, a degraded run could silently recommend
-an unsafe automated action instead of kicking it to a human.
+"""Sentinels are what the graph uses when an LLM node fails. nodes.py returns them instead
+of raising, so their contents matter. recovery_plan_sentinel() must always be 'escalate',
+the safe choice when the agent can't reason about a failure. classification_sentinel()
+must be 'unknown' with confidence 0.0, which tells recovery planning to lean toward
+escalate. If either changed, a failed run could quietly recommend an unsafe automatic
+action instead of handing it to a human.
 """
 from worker.app.agent.state import (
     classification_sentinel,

@@ -1,8 +1,7 @@
-"""run_diagnostic_agent() is the one function the executor calls in its
-`finally` block for every failed run. It must never raise, and it writes a
-recommendation row on almost every path. These tests lock down the four
-"return None, write nothing" paths, plus the success path, without touching
-a database, an LLM, or the module-level compiled graph.
+"""run_diagnostic_agent() is what the executor calls in its `finally` block for every failed
+run. It must never raise, and it writes a recommendation on almost every path. These tests
+cover the four paths that return None and write nothing, and the success path. They don't
+touch a database, an LLM or the compiled graph.
 """
 from unittest.mock import AsyncMock, MagicMock
 

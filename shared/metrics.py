@@ -1,16 +1,13 @@
-"""Custom domain metrics, registered on the default Prometheus registry so
-prometheus-fastapi-instrumentator's /metrics endpoint (wired up in
-control_plane/app/main.py) exposes these alongside its automatic HTTP
-request/latency metrics, all from one scrape target.
+"""Custom domain metrics, registered on the default Prometheus registry.
+prometheus-fastapi-instrumentator exposes them at /metrics (set up in
+control_plane/app/main.py) next to its HTTP metrics, so one scrape target covers both.
 
-These live in shared/, not control_plane/, because the worker process (a
-separate Python process, no FastAPI app of its own) also increments them,
-and prometheus_client metrics are per-process: the worker's counts never
-reached the control plane's /metrics endpoint until it got its own scrape
-target. worker/app/main.py calls prometheus_client's start_http_server() to
-expose /metrics on port 8001, scraped as a second job in
-observability/prometheus.yml. A pushgateway is for short-lived batch jobs;
-this worker runs continuously, so it exposes /metrics directly instead.
+They live in shared/ and not control_plane/ because the worker also increments them. The
+worker is a separate process and prometheus_client metrics are per process, so its counts
+never reached the control plane's /metrics. worker/app/main.py now calls
+start_http_server() to serve /metrics on port 8001, and observability/prometheus.yml
+scrapes it as a second job. A pushgateway is meant for short-lived jobs and this worker
+runs all the time, so it serves /metrics itself.
 """
 from prometheus_client import Counter, Histogram
 

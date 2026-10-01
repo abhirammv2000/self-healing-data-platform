@@ -31,13 +31,13 @@ class RetrievedChunk(BaseModel):
 class DiagnosticState(TypedDict):
     """The state object that flows through the LangGraph diagnostic graph.
 
-    Input fields are populated once at graph entry and never modified. Output fields are populated by their respective nodes — each field is written by exactly one node, so no reducer functions are needed.
+    Input fields are populated once at graph entry and never modified. Output fields are filled in by their own nodes. Each field is written by exactly one node, so no reducer functions are needed.
 
     All output fields except retrieved_context are Optional because the graph builds them incrementally: when the graph starts, they're None; after their node runs, they're populated.
-    retrieved_context is the exception — it defaults to [] not None, so downstream code (Recovery Planning) handles "no retrieved context" uniformly whether retrieval succeeded with zero hits or failed entirely. Less branching, same observable behavior.
+    retrieved_context is the exception. It defaults to [] and not None, so downstream code (Recovery Planning) treats "no retrieved context" the same whether retrieval found nothing or failed. That means less branching.
     """
 
-    # ---- inputs (set once at graph entry) ----
+    # inputs (set once at graph entry)
     run_id: int
     pipeline_id: int
     tenant_id: int
@@ -47,7 +47,7 @@ class DiagnosticState(TypedDict):
     #avoids re-running json.dumps three times and keeps state simple to checkpoint.
     run_context_json: str
 
-    # ---- accumulated outputs (populated by nodes) ----
+    # accumulated outputs (populated by nodes)
     log_analysis: Optional[LogAnalysisOutput]
     classification: Optional[ClassificationOutput]
     #retrieved_context is populated by the new retrieval_node (between classification and recovery_planning).
@@ -62,7 +62,7 @@ class DiagnosticState(TypedDict):
 # When a node fails (LLM error, structured-output validation error, network
 # blip, whatever), it returns its sentinel instead of propagating the exception.
 # Downstream nodes still get a well-typed input to work with, and the final
-# recommendation row still gets written — just clearly marked as degraded.
+# recommendation row still gets written, clearly marked as degraded.
 #
 # The breadcrumb is in two places:
 #   1. notable_signals contains a string like 'log_analysis_failed'

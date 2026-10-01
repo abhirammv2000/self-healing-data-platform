@@ -1,10 +1,13 @@
-"""Runbook indexer, run manually as `python -m worker.app.agent.index_runbooks`.
+"""Runbook indexer. Run it by hand with `python -m worker.app.agent.index_runbooks`.
 
-Scans worker/app/agent/runbooks/*.md, chunks each file by markdown headers, embeds the chunks, and replaces all source_type='runbook' rows in incident_embeddings with the new set.
+It reads worker/app/agent/runbooks/*.md, splits each file by markdown header, embeds the
+chunks, and replaces every source_type='runbook' row in incident_embeddings with the new
+set.
 
-Idempotent by design: each invocation fully replaces the runbook index. This is the right semantics because runbooks on disk are the source of truth, the DB is just a derived index that should always reflect the current disk state.
+Each run replaces the whole runbook index, so running it twice gives the same result. The
+files on disk are the source of truth and the database is only an index of them.
 
-Run this whenever a runbook file is added, edited, or deleted.
+Run it whenever a runbook is added, edited or deleted.
 """
 
 from pathlib import Path

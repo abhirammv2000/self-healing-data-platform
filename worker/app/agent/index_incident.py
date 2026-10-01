@@ -1,9 +1,13 @@
-"""Incident indexer, called fire-and-forget from run_diagnostic_agent after a recommendation is persisted.
+"""Incident indexer. run_diagnostic_agent calls it in the background after a recommendation
+is saved.
 
-Indexes ONE failure event into two rows in incident_embeddings: one for the run failure itself (source_type='past_run'), one for the recommendation (source_type='past_recommendation'). Both are tenant-scoped.
+It indexes one failure into two rows in incident_embeddings: one for the run failure
+(source_type='past_run') and one for the recommendation
+(source_type='past_recommendation'). Both are tenant-scoped.
 
-The function must be defensive. It runs as a background task, and any exception here would surface as an unhandled task exception, polluting logs without affecting the user-visible response.
-We catch everything and log it, never raise.
+It has to catch everything. It runs as a background task, so an exception would show up as
+an unhandled task error in the logs without affecting the response. We log it and never
+raise.
 """
 
 from shared.db import async_session

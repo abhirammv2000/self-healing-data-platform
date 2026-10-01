@@ -12,7 +12,7 @@ FailureClassification=Literal["network", "quota", "schema", "partial_load", "unk
 RecommendedAction=Literal["retry", "retry_with_backoff", "schema_evolution", "replay_from_raw", "escalate", "pause_schedule"]
 
 # ============================================================================
-# Multi-agent schemas — one output model per LangGraph node.
+# Multi-agent schemas: one output model per LangGraph node.
 # Each model is intentionally focused on what its node actually produces,
 # nothing more. Keeping them small makes each LLM call's structured-output
 # constraint tighter, which improves reliability of the generated JSON.

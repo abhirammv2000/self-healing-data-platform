@@ -1,14 +1,12 @@
-"""Root conftest. Runs before any test module imports app code.
+"""Root conftest. It runs before any test imports app code.
 
-Every module under shared/, worker/, control_plane/ reads its config at import
-time via shared/config.py's module-level os.getenv() calls, and a few (the
-diagnostic agent's LLM client, the embeddings client, both DB engines) build
-clients/engines at import time too. These tests mock the network/DB
-boundaries, so the env values only need to be syntactically valid.
+Modules under shared/, worker/ and control_plane/ read their config when they are
+imported (shared/config.py calls os.getenv at module level). Some also build an LLM
+client, an embeddings client or a DB engine at import time. The tests mock the network
+and the database, so the env values only need to look valid.
 
-os.environ.setdefault() runs before shared/config.py's load_dotenv() call
-(conftest.py is always imported first), and load_dotenv() defaults to
-override=False, so these fakes win over anything in a developer's local .env.
+os.environ.setdefault() runs before load_dotenv() in shared/config.py, and load_dotenv()
+does not override existing values. So these fake values win over a developer's local .env.
 """
 import os
 

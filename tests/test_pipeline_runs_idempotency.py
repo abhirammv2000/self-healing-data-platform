@@ -1,16 +1,16 @@
-"""create_pipeline_run_service's idempotency logic (control_plane/app/services/pipeline_runs.py)
-has two paths worth locking down independently:
-  1. The fast path: an upfront SELECT finds an existing run for (pipeline_id, idempotency_key)
-     and returns it without ever attempting an INSERT.
-  2. The race path: the upfront SELECT finds nothing (two requests arrived close enough
-     together that neither saw the other's row yet), the INSERT hits the DB's own unique
-     constraint, and the service recovers by re-querying for the row that won instead of
-     surfacing the IntegrityError to the caller.
+"""create_pipeline_run_service (control_plane/app/services/pipeline_runs.py) handles
+idempotency in two ways, and each is tested on its own.
 
-session.execute/add/commit/refresh/rollback are all mocked here; this is testing the
-function's own control flow around those calls, not SQLAlchemy or Postgres. The Postgres
-unique constraint and a concurrent request pair against it were checked by hand against
-the live system before this test file was written.
+  1. Fast path: a SELECT finds an existing run for (pipeline_id, idempotency_key) and
+     returns it without trying an INSERT.
+  2. Race path: the SELECT finds nothing because two requests arrived at nearly the same
+     time, the INSERT hits the database's unique constraint, and the service queries again
+     for the row that won instead of passing the IntegrityError to the caller.
+
+session.execute, add, commit, refresh and rollback are all mocked. These tests check the
+function's own control flow, not SQLAlchemy or Postgres. I checked the real unique
+constraint with two concurrent requests against the live system by hand before writing
+this file.
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock

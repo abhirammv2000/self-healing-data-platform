@@ -26,7 +26,7 @@ from worker.app.agent.state import RetrievedChunk
 #   the structured outputs. We want neutral, evidence-driven outputs.
 # ============================================================================
 
-# ---- Log Analysis node prompts ----
+# Log Analysis node prompts
 
 LOG_ANALYSIS_SYSTEM_PROMPT="""You are a data pipeline log analyst. Your job is to DESCRIBE what happened during a failed pipeline run, NOT to classify the failure or recommend a fix. Other specialists will handle classification and recovery planning. Your job is observation only.
 
@@ -62,7 +62,7 @@ Produce your structured log analysis. Remember: describe only, do not classify o
 log_analysis_prompt=ChatPromptTemplate.from_messages([("system", LOG_ANALYSIS_SYSTEM_PROMPT),("human", LOG_ANALYSIS_HUMAN_PROMPT),])
 
 
-# ---- Failure Classification node prompts ----
+# Failure Classification node prompts
 
 CLASSIFICATION_SYSTEM_PROMPT="""You are a data pipeline failure classifier. Your job is to assign a single category to a failure based on the log analysis and original error metadata produced by other specialists.
 
@@ -108,7 +108,7 @@ Produce your structured classification."""
 classification_prompt=ChatPromptTemplate.from_messages([("system", CLASSIFICATION_SYSTEM_PROMPT),("human", CLASSIFICATION_HUMAN_PROMPT),])
 
 
-# ---- Recovery Planning node: tool-decision step ----
+# Recovery Planning node: tool-decision step
 #
 # Tool calling via bind_tools(): the model gets a bound callable
 # (get_circuit_breaker_state, see tools.py) and decides for itself whether
@@ -140,7 +140,7 @@ Decide whether to check the circuit breaker state before recovery planning proce
 tool_decision_prompt=ChatPromptTemplate.from_messages([("system", TOOL_DECISION_SYSTEM_PROMPT),("human", TOOL_DECISION_HUMAN_PROMPT),])
 
 
-# ---- Recovery Planning node prompts ----
+# Recovery Planning node prompts
 
 #design note on the retrieved context block:
 #we render the retrieved chunks into prompt text via render_retrieved_context() below rather than passing the list of Pydantic objects directly. Two reasons:

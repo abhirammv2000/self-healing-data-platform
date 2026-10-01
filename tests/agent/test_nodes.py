@@ -1,19 +1,14 @@
-"""worker/app/agent/nodes.py's three LLM nodes share one contract: on success
-they return {"<field>": <parsed Pydantic output>}, on any exception from the
-chain they return {"<field>": <sentinel>()} instead of letting the exception
-propagate and crash the graph. classification_node and recovery_planning_node
-have a second contract on top of that: if their required upstream input is
-None, they must return the sentinel without calling the LLM at all, since
-there's nothing meaningful to send it.
+"""The three LLM nodes in worker/app/agent/nodes.py share one rule. On success they return
+{"<field>": <parsed output>}. If the chain raises, they return {"<field>": <sentinel>()}
+instead of crashing the graph. classification_node and recovery_planning_node have a
+second rule: if the input they need is None, they return the sentinel without calling the
+LLM at all.
 
-The module-level chains (_log_analysis_chain etc.) are built once at import
-time from a ChatGoogleGenerativeAI client, and each is a LangChain
-RunnableSequence: a Pydantic model, so it rejects setting an arbitrary
-`.ainvoke` attribute on the instance (Pydantic validates field names on
-__setattr__). So instead of patching a method onto the chain object, every
-test here swaps out the whole module-level chain for a small fake with an
-async ainvoke(), via monkeypatch.setattr(nodes, "_log_analysis_chain", ...).
-That keeps every test away from the real Gemini API.
+The module-level chains (_log_analysis_chain and the others) are LangChain
+RunnableSequence objects, which are Pydantic models, so you can't set an .ainvoke
+attribute on them. Each test swaps the whole chain for a small fake with an async
+ainvoke() using monkeypatch.setattr(nodes, "_log_analysis_chain", ...). That keeps every
+test away from the real Gemini API.
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -71,9 +66,7 @@ def make_recovery_plan_output(**overrides):
     return RecoveryPlanOutput(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # log_analysis_node
-# ---------------------------------------------------------------------------
 
 async def test_log_analysis_node_returns_chain_output_on_success(monkeypatch):
     expected = make_log_analysis_output()
@@ -100,9 +93,7 @@ async def test_log_analysis_node_falls_back_to_sentinel_on_chain_failure(monkeyp
     assert "ConnectionTimeout" in sentinel.error_interpretation
 
 
-# ---------------------------------------------------------------------------
 # classification_node
-# ---------------------------------------------------------------------------
 
 async def test_classification_node_returns_chain_output_on_success(monkeypatch):
     expected = make_classification_output()
@@ -144,9 +135,7 @@ async def test_classification_node_falls_back_to_sentinel_on_chain_failure(monke
     assert result["classification"].confidence == 0.0
 
 
-# ---------------------------------------------------------------------------
 # recovery_planning_node
-# ---------------------------------------------------------------------------
 
 def make_recovery_state(**overrides):
     state = {
@@ -196,9 +185,7 @@ async def test_recovery_planning_node_falls_back_to_sentinel_on_chain_failure(mo
     assert result["recovery_plan"].recommended_action == "escalate"
 
 
-# ---------------------------------------------------------------------------
 # recovery_planning_node: tool-decision step
-# ---------------------------------------------------------------------------
 
 async def test_recovery_planning_node_uses_the_tool_result_when_the_model_calls_it(monkeypatch):
     # get_circuit_breaker_state is a @tool-decorated BaseTool, a Pydantic model like the

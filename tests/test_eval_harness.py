@@ -1,9 +1,8 @@
-"""Zero-cost sanity check on eval/run_eval.py's own scoring logic, run before
-ever pointing it at a Gemini key. Same FakeChain mocking approach as
-tests/agent/test_nodes.py. This isn't testing the model's accuracy (that's
-the point of the real run); it's testing that run_eval.py counts correctly:
-exact matches, alternates, confusion pairs, and the retrieval ablation's
-fallback comparison.
+"""A free check of the scoring logic in eval/run_eval.py, to run before using a Gemini key.
+It uses the same FakeChain mocking as tests/agent/test_nodes.py. It doesn't test the
+model's accuracy, which is what the real run is for. It tests that run_eval.py counts
+correctly: exact matches, alternates, confusion pairs and the retrieval ablation
+comparison.
 """
 from unittest.mock import AsyncMock
 

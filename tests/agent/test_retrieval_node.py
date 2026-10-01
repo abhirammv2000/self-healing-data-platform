@@ -1,18 +1,14 @@
-"""retrieval_node has two jobs worth locking down independently:
+"""retrieval_node has two things worth testing on their own.
 
-1. _build_query(): the text that gets embedded and searched on. It has a
-   defensive branch for when classification/log_analysis are None (state
-   is TypedDict-typed as always-populated by the time retrieval runs, but the
-   function still guards against the impossible case), which is easy to break
-   silently since nothing else exercises that branch.
-2. retrieval_node() itself: combines two SQL queries (runbooks, tenant-scoped
-   incidents) into one globally similarity-sorted list, converts pgvector
-   cosine distance to an intuitive similarity score, and follows the same
-   graceful-degradation contract as the LLM nodes, returning an empty list
-   rather than raising if the embedding call or either query fails.
+1. _build_query() builds the text that is embedded and searched. It has a defensive branch
+   for when classification or log_analysis is None. The state type says they are always
+   set by then, but the guard is easy to break because nothing else runs that branch.
+2. retrieval_node() joins two SQL queries (runbooks and tenant incidents) into one list
+   sorted by similarity, turns pgvector cosine distance into a similarity score, and
+   returns an empty list instead of raising if the embedding call or either query fails.
 
-Both the DB session and the embedding call are mocked; a real pgvector
-instance is not something a unit test should depend on.
+The DB session and the embedding call are both mocked. A unit test shouldn't need a real
+pgvector instance.
 """
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -48,9 +44,7 @@ def patch_session(monkeypatch, execute_results):
     monkeypatch.setattr(rn, "async_session", lambda: FakeSessionCM(execute_results))
 
 
-# ---------------------------------------------------------------------------
 # _build_query
-# ---------------------------------------------------------------------------
 
 def test_build_query_uses_upstream_classification_and_log_analysis():
     state = {
@@ -83,9 +77,7 @@ def test_build_query_degrades_gracefully_when_upstream_outputs_are_none():
     assert "unknown failure during unknown step" in query
 
 
-# ---------------------------------------------------------------------------
 # retrieval_node
-# ---------------------------------------------------------------------------
 
 async def _run_with(monkeypatch, execute_results, embed_result=None, embed_side_effect=None):
     patch_session(monkeypatch, execute_results)

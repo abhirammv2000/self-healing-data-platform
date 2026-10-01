@@ -1,0 +1,13 @@
+# Observability
+
+OpenTelemetry tracing, Prometheus metrics, and structured logging are correlated with each other. All local and free, no vendor, no API key.
+
+```bash
+docker compose up -d   # starts Jaeger (:16686), Prometheus (:9090), and Grafana (:3001) alongside Postgres/Redis
+```
+
+- **Tracing** (`shared/observability.py`): every control-plane request and every worker operation (a pipeline step, the diagnostic agent's LangGraph invocation) gets a span, exported via OTLP to Jaeger. A failed run produced one trace with 3 correctly nested spans (`execute_pipeline_run` -> `pipeline_step` and -> `diagnostic_agent_graph`), confirmed by querying Jaeger's API directly.
+- **Structured logging**: every `print()` in `worker/` and `shared/` (25 of them) was replaced with structured, JSON-rendered log calls via `structlog`. A custom processor stamps the *active span's* `trace_id`/`span_id` onto every log line. In one run, every log line shared the same `trace_id`, with different `span_id`s as execution moved between the pipeline-step span and the diagnostic-agent span, which is the point of combining the two tools.
+- **Metrics** (`shared/metrics.py`): `prometheus-fastapi-instrumentator` gives the control plane automatic HTTP metrics at `/metrics`. Custom domain counters (`pipeline_runs_total`, `pipeline_run_duration_seconds`, `diagnostic_agent_classifications_total`, `diagnostic_agent_recommendations_total`, `circuit_breaker_transitions_total`) are incremented in the worker. `prometheus_client` metrics are per-process, so the worker's counters never reached the control plane's `/metrics` until the worker got its own scrape target (`start_http_server(8001)`, a second `prometheus.yml` job); confirmed by querying Prometheus before the fix (empty) and after (populated, both targets `up`).
+- **Grafana** (`:3001`, anonymous admin access, local dev only) comes up with Prometheus and Jaeger pre-provisioned as datasources (`observability/grafana/provisioning/`), no manual setup.
+- **SLOs and alerts** ([SLOs.md](SLOs.md)): three objectives (API availability 99.5%, API latency 95% under 0.5s, and 95% of failed runs getting a recommendation), with multi-window burn-rate alerts, Alertmanager, a provisioned Grafana dashboard, and a runbook for each alert in [runbooks/](runbooks/). The rules have promtool unit tests (`promtool test rules observability/rules/tests/slo.test.yml`) that feed synthetic series through the real rule files, run in CI. I also ran the real Prometheus and Alertmanager against a stand-in service returning 50% errors and watched the alerts go from pending to firing and arrive at a webhook. The thresholds have not been tuned against real traffic.

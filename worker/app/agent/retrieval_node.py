@@ -1,12 +1,18 @@
-"""Retrieval node, sits between classification and recovery_planning in the diagnostic graph.
+"""Retrieval node. It sits between classification and recovery_planning in the diagnostic
+graph.
 
-Builds a structured query from upstream state (classification + log analysis + raw error metadata), embeds it, and runs two tenant-aware pgvector similarity searches against incident_embeddings:
-  - Top K_RUNBOOKS chunks from runbooks (global, no tenant filter)
-  - Top K_INCIDENTS chunks from past_run + past_recommendation rows (tenant-scoped)
+It builds a query from the earlier state (classification, log analysis and the raw error),
+embeds it, and runs two pgvector similarity searches on incident_embeddings:
+  - the top K_RUNBOOKS chunks from runbooks (global, no tenant filter)
+  - the top K_INCIDENTS chunks from past_run and past_recommendation rows (tenant-scoped)
 
-The split-then-combine approach gives us diversity: pure top-5 by similarity could come back as all runbooks (more of them) or all incidents (tenant-scoped recency), neither of which gives Recovery Planning the breadth of context we want.
+Searching the two separately and then combining gives more variety. A single top-5 could
+come back as all runbooks or all incidents, and neither gives recovery planning enough
+range.
 
-Failures here are absorbed: any exception falls back to an empty list, so downstream sees "no retrieved context", same as a legitimately empty result. Recovery Planning is written to handle the empty case explicitly.
+Failures are absorbed. Any exception returns an empty list, so later steps see "no
+retrieved context" just as they would for a real empty result. Recovery planning handles
+the empty case on purpose.
 """
 
 from sqlalchemy import text

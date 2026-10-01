@@ -1,11 +1,9 @@
-"""step_handlers.py is where every error the diagnostic agent has to reason
-about originates: IngestionStepError, ValidationStepError,
-TransformationStepError, LoadStepError. This suite exercises each step's
-success path and its reachable failure modes directly against the
-pandas/file-system logic, with no DB and no network beyond a monkeypatched
-fetch_data(). These are also the failure shapes used later to build the
-diagnostic agent's labeled eval cases, so getting the exact exception
-messages right here matters beyond just coverage.
+"""Every error the diagnostic agent has to reason about starts in step_handlers.py:
+IngestionStepError, ValidationStepError, TransformationStepError and LoadStepError. These
+tests cover each step's success path and its reachable failures against the pandas and
+file-system logic, with no DB and no network beyond a monkeypatched fetch_data(). The same
+failure shapes were later used to build the agent's labeled eval cases, so the exact
+messages matter here.
 """
 import pandas as pd
 import pytest
@@ -19,9 +17,7 @@ from worker.app.exceptions import (
 )
 
 
-# ---------------------------------------------------------------------------
 # run_ingestion
-# ---------------------------------------------------------------------------
 
 async def test_ingestion_requires_a_source_url():
     with pytest.raises(IngestionStepError, match="No source_url"):
@@ -54,9 +50,7 @@ async def test_ingestion_saves_the_fetched_file_and_records_it_in_run_context(mo
     assert (tmp_path / saved_path).read_bytes() == b"a,b\n1,2\n"
 
 
-# ---------------------------------------------------------------------------
 # run_validation
-# ---------------------------------------------------------------------------
 
 async def test_validation_requires_ingestion_output():
     with pytest.raises(ValidationStepError, match="requires ingestion output"):
@@ -114,9 +108,7 @@ async def test_validation_passes_and_records_row_and_column_counts(tmp_path):
     assert run_context["validation"]["column_count"] == 2
 
 
-# ---------------------------------------------------------------------------
 # run_transformation
-# ---------------------------------------------------------------------------
 
 async def test_transformation_requires_validated_file_path():
     with pytest.raises(TransformationStepError, match="requires validated_file_path"):
@@ -176,9 +168,7 @@ async def test_transformation_renames_filters_and_drops_columns(tmp_path):
     assert df["id"].tolist() == [5]
 
 
-# ---------------------------------------------------------------------------
 # run_load
-# ---------------------------------------------------------------------------
 
 async def test_load_requires_transformed_file_path():
     with pytest.raises(LoadStepError, match="requires transformed_file_path"):
