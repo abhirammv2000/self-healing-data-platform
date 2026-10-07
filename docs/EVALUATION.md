@@ -1,6 +1,6 @@
 # Testing and evaluation
 
-**Automated: 63 unit tests, run in CI on every push.**
+**Automated: 69 unit tests, run in CI on every push.**
 
 ```bash
 pip install -r requirements-dev.txt

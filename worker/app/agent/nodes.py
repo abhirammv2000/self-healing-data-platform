@@ -5,6 +5,7 @@ from worker.app.agent.state import (DiagnosticState,log_analysis_sentinel,classi
 from worker.app.agent.schemas import (LogAnalysisOutput,ClassificationOutput,RecoveryPlanOutput,)
 from worker.app.agent.prompts import (log_analysis_prompt,classification_prompt,recovery_planning_prompt,tool_decision_prompt,render_retrieved_context,)
 from worker.app.agent.tools import get_circuit_breaker_state
+from worker.app.agent.usage import TokenUsageHandler, node_tag
 
 log=get_logger(__name__)
 
@@ -14,7 +15,7 @@ log=get_logger(__name__)
 #use the same model (gemini-2.5-flash). If we ever want to specialize, e.g. a heavier model
 #for classification and a faster one for log analysis, this is the one spot to change.
 
-_llm=ChatGoogleGenerativeAI(model=GEMINI_MODEL,google_api_key=GOOGLE_API_KEY,temperature=0)
+_llm=ChatGoogleGenerativeAI(model=GEMINI_MODEL,google_api_key=GOOGLE_API_KEY,temperature=0,callbacks=[TokenUsageHandler()])
 
 #each node gets its own structured chain, built once at module load.
 #with_structured_output() per node constrains each LLM call to produce JSON matching
@@ -22,16 +23,17 @@ _llm=ChatGoogleGenerativeAI(model=GEMINI_MODEL,google_api_key=GOOGLE_API_KEY,tem
 #the reliability win that makes multi-node graphs viable: each call has a tight constraint
 #instead of one big call trying to populate everything.
 
-_log_analysis_chain=log_analysis_prompt|_llm.with_structured_output(LogAnalysisOutput)
-_classification_chain=classification_prompt|_llm.with_structured_output(ClassificationOutput)
-_recovery_planning_chain=recovery_planning_prompt|_llm.with_structured_output(RecoveryPlanOutput)
+#each chain is tagged with its node name so the token counter in usage.py can say which node spent the tokens.
+_log_analysis_chain=(log_analysis_prompt|_llm.with_structured_output(LogAnalysisOutput)).with_config(tags=[node_tag("log_analysis")])
+_classification_chain=(classification_prompt|_llm.with_structured_output(ClassificationOutput)).with_config(tags=[node_tag("classification")])
+_recovery_planning_chain=(recovery_planning_prompt|_llm.with_structured_output(RecoveryPlanOutput)).with_config(tags=[node_tag("recovery_planning")])
 
 #separate chain for the tool-decision step ahead of recovery planning: bind_tools() and
 #with_structured_output() don't compose into a single chain, so this is a separate call whose
 #(possible) tool result gets rendered into the final chain's tool_results_block input above,
 #the same way retrieved_context_block already works. See tools.py and the TOOL_DECISION_*
 #prompts in prompts.py for why this specific tool exists.
-_tool_decision_chain=tool_decision_prompt|_llm.bind_tools([get_circuit_breaker_state])
+_tool_decision_chain=(tool_decision_prompt|_llm.bind_tools([get_circuit_breaker_state])).with_config(tags=[node_tag("tool_decision")])
 
 
 # ============================================================================

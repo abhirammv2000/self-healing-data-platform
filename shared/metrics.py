@@ -34,6 +34,12 @@ diagnostic_agent_recommendations_total = Counter(
     ["action"],  # retry, retry_with_backoff, schema_evolution, replay_from_raw, escalate, pause_schedule
 )
 
+diagnostic_agent_llm_tokens_total = Counter(
+    "diagnostic_agent_llm_tokens_total",
+    "Tokens the diagnostic agent's Gemini calls used, by node. Not a dollar cost: multiply by your model's price.",
+    ["node", "direction"],  # node: log_analysis, classification, recovery_planning, tool_decision; direction: input, output
+)
+
 circuit_breaker_transitions_total = Counter(
     "circuit_breaker_transitions_total",
     "Circuit breaker state transitions, counted at the moment a pipeline's breaker changes state.",
