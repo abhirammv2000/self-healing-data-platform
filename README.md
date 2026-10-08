@@ -68,7 +68,7 @@ docs/            architecture, setup, evaluation, SLOs, runbooks
 
 ## Limits
 
-- The agent only recommends. Nothing applies a fix automatically.
+- The agent only recommends. A fix runs only after a person marks the recommendation applied (`PUT /tenants/{tenant_id}/recommendations/{rec_id}` with `{"status": "applied"}`). Approving a retry starts a new run, approving `pause_schedule` pauses the schedule, and approving `schema_evolution`, `replay_from_raw` or `escalate` only records the decision, because those change data or need judgement. A decision is final, and approving the same recommendation twice cannot start two runs.
 - The evaluation is small. It also found a real problem: the agent tends to pick `schema_evolution` for data quality issues. The roadmap in [docs/ROADMAP.md](docs/ROADMAP.md) lists this and the other next steps.
 - The step handlers cannot yet produce the `partial_load` failure type in real runs, only in the evaluation cases.
 - Gemini is the model provider because the project first planned to run on GCP. It was never changed.
