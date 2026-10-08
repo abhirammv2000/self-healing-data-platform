@@ -29,7 +29,7 @@ More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What has been tested
 
-- **69 unit tests**, run in CI on every push. They need no database, Redis or API key.
+- **88 unit tests**, run in CI on every push. They need no database, Redis or API key.
 - **A 33-case evaluation** of the agent, using hand-labeled failures and live Gemini calls: 90.9% classification accuracy and 84.8% recommended-action accuracy. The inputs to the later graph steps are hand-written stand-ins, and one weak spot is documented. See [docs/EVALUATION.md](docs/EVALUATION.md).
 - **3 SLOs** with burn-rate alerts, Alertmanager, a Grafana dashboard and a runbook for each alert. The alert rules have unit tests that run in CI. The thresholds have not been tuned on real traffic. See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) and [docs/SLOs.md](docs/SLOs.md).
 - **A real AWS EKS deployment:** Terraform builds the VPC, EKS, RDS, ElastiCache and ECR. Helm installs the control plane and worker. I ran a pipeline through it, then tore everything down and checked the AWS console for leftovers. Nothing runs by default. The steps to bring it back are in [helm/shdp/README.md](helm/shdp/README.md).
@@ -68,7 +68,7 @@ docs/            architecture, setup, evaluation, SLOs, runbooks
 
 ## Limits
 
-- The agent only recommends. Nothing applies a fix automatically.
+- The agent only recommends. A fix runs only after a person marks the recommendation applied (`PUT /tenants/{tenant_id}/recommendations/{rec_id}` with `{"status": "applied"}`). Approving a retry starts a new run, approving `pause_schedule` pauses the schedule, and approving `schema_evolution`, `replay_from_raw` or `escalate` only records the decision, because those change data or need judgement. A decision is final, and approving the same recommendation twice cannot start two runs.
 - The evaluation is small. It also found a real problem: the agent tends to pick `schema_evolution` for data quality issues. The roadmap in [docs/ROADMAP.md](docs/ROADMAP.md) lists this and the other next steps.
 - The step handlers cannot yet produce the `partial_load` failure type in real runs, only in the evaluation cases.
 - Gemini is the model provider because the project first planned to run on GCP. It was never changed.

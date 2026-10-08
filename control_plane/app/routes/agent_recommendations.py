@@ -5,6 +5,8 @@ from control_plane.app.services.agent_recommendations import get_agent_recommend
 from control_plane.app.schemas.agent_recommendations import AgentRecommendationResponse, AgentRecommendationUpdate
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from typing import List
+from shared.redis_client import redis_client
+from shared.redis_client import redis_client
 
 run_recommendations_router=APIRouter()
 pipeline_recommendations_router=APIRouter()
@@ -82,5 +84,12 @@ async def update_agent_recommendation(tenant_id: int, rec_id: int, rec_data: Age
     
     if not agent_recommendation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent recommendation not found. Please check the rec_id")
+
+    #a retry created a run, so put it on the queue the worker reads
+    if getattr(agent_recommendation, "enqueue_run_id", None) is not None:
+        try:
+            await redis_client.rpush("pipeline_runs", str(agent_recommendation.enqueue_run_id))
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="The recommendation was applied and a run was created, but it could not be queued. Start the run by hand.")
     
     return agent_recommendation

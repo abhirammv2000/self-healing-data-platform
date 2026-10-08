@@ -16,6 +16,8 @@ class AgentRecommendationResponse(BaseModel):
     status: StatusType
     created_at: datetime
     updated_at: Optional[datetime]
+    # what happened when a person applied it, for example "queued run 42". None on every other read.
+    applied_effect: Optional[str] = None
 
     model_config = {
         "from_attributes": True
