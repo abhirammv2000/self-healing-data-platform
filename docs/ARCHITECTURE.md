@@ -186,6 +186,6 @@ A few principles applied consistently across the codebase:
 - **Dual filtering (`tenant_id + resource_id`)** on all tenant-scoped queries for ownership verification.
 - **Narrow `try` blocks in the service layer** so `HTTPException` is never swallowed by `SQLAlchemyError` handlers.
 - **`None` returns from services for 404 cases;** the route layer translates them to HTTP responses.
-- **Custom exception classes** for all domain errors (`InvalidPipelineRunStatus`, `ValidationStepError`, etc.).
+- **Custom exception classes** for all domain errors (`InvalidPipelineRunStatusError`, `ValidationStepError`, etc.).
 - **The agent is best-effort and fully defensive**: it can never break the executor, and degraded diagnoses are clearly flagged and escalated.
 - **Plain language over hype.** The system *diagnoses and recommends*; it does not autonomously remediate. The docs describe exactly what's built.

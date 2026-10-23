@@ -3,7 +3,6 @@ call. It is tested here as a plain async function through .ainvoke(), apart from
 the model decides to call it. That decision is tested in test_nodes.py.
 """
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from worker.app.agent import tools
 

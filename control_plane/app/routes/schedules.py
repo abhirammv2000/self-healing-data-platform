@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, HTTPException, Query 
+from fastapi import APIRouter, Depends, status, HTTPException 
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.db import get_db
 from control_plane.app.services.schedules import create_schedule_service, get_schedule_service, delete_schedule_service, update_schedule_service

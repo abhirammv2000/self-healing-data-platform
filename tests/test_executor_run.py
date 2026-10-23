@@ -12,12 +12,12 @@ These tests check the executor's own decisions, not SQLAlchemy or Postgres.
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from worker.app import executor
-from worker.app.exceptions import InvalidPipelineRunStatus, ObservabilityRecordingError, UnknownStepTypeError
+from worker.app.exceptions import InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
 
 NOW = datetime(2026, 1, 1, 12, 0, 0)
 
@@ -378,7 +378,7 @@ async def test_a_blocked_run_does_not_trigger_the_agent_the_run_record_or_the_we
 async def test_an_open_breaker_does_not_overwrite_a_run_that_is_no_longer_queued(harness):
     h = harness([step(1, "ok")], breaker("open"), run_status="running")
 
-    with pytest.raises(InvalidPipelineRunStatus, match="'running'"):
+    with pytest.raises(InvalidPipelineRunStatusError, match="'running'"):
         await h.run()
 
     assert h.database.run.status == "running"
@@ -390,7 +390,7 @@ async def test_an_open_breaker_does_not_overwrite_a_run_that_is_no_longer_queued
 async def test_a_run_that_is_not_queued_is_refused_and_left_as_it_was(harness):
     h = harness([step(1, "ok")], run_status="success")
 
-    with pytest.raises(InvalidPipelineRunStatus, match="expected 'queued'"):
+    with pytest.raises(InvalidPipelineRunStatusError, match="expected 'queued'"):
         await h.run()
 
     assert h.database.run.status == "success"

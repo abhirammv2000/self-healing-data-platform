@@ -6,7 +6,6 @@ from control_plane.app.schemas.agent_recommendations import AgentRecommendationR
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from typing import List
 from shared.redis_client import redis_client
-from shared.redis_client import redis_client
 
 run_recommendations_router=APIRouter()
 pipeline_recommendations_router=APIRouter()

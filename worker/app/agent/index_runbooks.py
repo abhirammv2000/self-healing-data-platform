@@ -119,7 +119,7 @@ def main():
             print(f"Deleted {delete_result.rowcount} existing runbook rows")
 
             #insert new rows. tenant_id is NULL because runbooks are global; source_id is NULL because runbooks have no DB-side source row to reference.
-            for chunk, embedding in zip(all_chunks, embeddings):
+            for chunk, embedding in zip(all_chunks, embeddings, strict=True):
                 row=IncidentEmbedding(source_type="runbook",source_id=None,source_ref=chunk["source_ref"],
                                        chunk_text=chunk["chunk_text"],embedding=embedding,tenant_id=None,meta=chunk["meta"],)
                 session.add(row)

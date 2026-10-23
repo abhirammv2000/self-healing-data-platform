@@ -17,7 +17,7 @@ async def run_ingestion(config, run_context):
     run_id=run_context["run_id"]
     source_url=config.get("source_url")
     if not source_url:
-        raise IngestionStepError(f"No source_url parameter. Ingestion step requires a source_url in config")
+        raise IngestionStepError("No source_url parameter. Ingestion step requires a source_url in config")
 
     try:
         raw=await fetch_data(source_url)
@@ -130,7 +130,7 @@ async def run_transformation(config, run_context):
             except (ValueError, TypeError) as e:
                 raise TransformationStepError(
                     f"Type mismatch: Cannot cast filter value '{value}' to {target_dtype} for column '{column}'"
-                )
+                ) from e
 
             try:#get the corresponding operator function and apply it to the df
                 op_func=ops[op_str]

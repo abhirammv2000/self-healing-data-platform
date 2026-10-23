@@ -28,7 +28,7 @@ from shared.db import async_session
 from shared.observability import get_logger, get_tracer
 from shared.utils import now_naive
 from shared.webhook_dispatcher import dispatch_webhook_callback
-from worker.app.exceptions import InvalidPipelineRunStatus, ObservabilityRecordingError, UnknownStepTypeError
+from worker.app.exceptions import InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
 from worker.app.step_handlers import step_registry
 
 log = get_logger(__name__)
@@ -161,7 +161,7 @@ async def _raise_run_not_claimable(session, run_id):
     pipeline_run = await _fetch_run(session, run_id)
     if not pipeline_run:
         raise ValueError(f"Pipeline run {run_id} not found")
-    raise InvalidPipelineRunStatus(f"Pipeline run {run_id} is in '{pipeline_run.status}' state, expected 'queued'")
+    raise InvalidPipelineRunStatusError(f"Pipeline run {run_id} is in '{pipeline_run.status}' state, expected 'queued'")
 
 
 # ---- running the steps ----
