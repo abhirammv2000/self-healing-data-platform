@@ -5,7 +5,6 @@ touch a database, an LLM or the compiled graph.
 """
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from worker.app.agent import diagnostic_agent as da
 from worker.app.agent.schemas import ClassificationOutput, RecoveryPlanOutput

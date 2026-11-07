@@ -25,7 +25,6 @@ import asyncio
 import json
 import sys
 from collections import Counter
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 

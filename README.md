@@ -29,7 +29,7 @@ More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What has been tested
 
-- **88 unit tests**, run in CI on every push. They need no database, Redis or API key.
+- **126 unit tests**, run in CI on every push with a `ruff` lint check. They need no database, Redis or API key.
 - **A 33-case evaluation** of the agent, using hand-labeled failures and live Gemini calls: 90.9% classification accuracy and 84.8% recommended-action accuracy. The inputs to the later graph steps are hand-written stand-ins, and one weak spot is documented. See [docs/EVALUATION.md](docs/EVALUATION.md).
 - **3 SLOs** with burn-rate alerts, Alertmanager, a Grafana dashboard and a runbook for each alert. The alert rules have unit tests that run in CI. The thresholds have not been tuned on real traffic. See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) and [docs/SLOs.md](docs/SLOs.md).
 - **A real AWS EKS deployment:** Terraform builds the VPC, EKS, RDS, ElastiCache and ECR. Helm installs the control plane and worker. I ran a pipeline through it, then tore everything down and checked the AWS console for leftovers. Nothing runs by default. The steps to bring it back are in [helm/shdp/README.md](helm/shdp/README.md).
@@ -50,7 +50,7 @@ uvicorn control_plane.app.main:app --reload            # API docs at http://loca
 python -m worker.app.main                              # worker, in a second terminal
 ```
 
-Run the tests with `pip install -r requirements-dev.txt` and `pytest tests`. All commands run from the project root. More setup detail is in [docs/SETUP.md](docs/SETUP.md).
+Run the tests with `pip install -r requirements-dev.txt` and `pytest tests`, and lint with `ruff check .`. All commands run from the project root. More setup detail is in [docs/SETUP.md](docs/SETUP.md).
 
 ## Layout
 

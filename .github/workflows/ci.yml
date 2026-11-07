@@ -22,6 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Lint
+        # rules and exceptions are in pyproject.toml, including the snake_case name check
+        run: ruff check .
+
       - name: Run tests
         # Unit tests only: LLM chains, the pgvector session, and the data warehouse
         # write are all mocked, so no Postgres/pgvector, Redis, or GOOGLE_API_KEY is
