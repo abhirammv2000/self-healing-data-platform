@@ -45,3 +45,9 @@ circuit_breaker_transitions_total = Counter(
     "Circuit breaker state transitions, counted at the moment a pipeline's breaker changes state.",
     ["to_state"],  # "open" or "closed", the only two transitions executor.py triggers
 )
+
+pipeline_runs_recovered_total = Counter(
+    "pipeline_runs_recovered_total",
+    "Runs the reaper found lost and dealt with. Every one of these is a run that would otherwise have been stuck.",
+    ["reason"],  # queued_again, requeued_worker_lost or failed_worker_lost
+)

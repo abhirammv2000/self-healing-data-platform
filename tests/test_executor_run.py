@@ -104,6 +104,13 @@ class FakeSessionFactory:
         return False
 
 
+class FakeLeaseKeeper:
+    """Stands in for the heartbeat, which has its own tests in test_lease.py."""
+
+    async def stop(self):
+        pass
+
+
 @dataclass
 class Harness:
     database: FakeDatabase
@@ -155,6 +162,7 @@ def harness(monkeypatch):
         monkeypatch.setattr(executor, "async_session", FakeSessionFactory(database))
         monkeypatch.setattr(executor, "now_naive", lambda: NOW)
         monkeypatch.setattr(executor, "asyncio", SimpleNamespace(sleep=fake_sleep, create_task=lambda coro: coro))
+        monkeypatch.setattr(executor, "start_lease_keeper", lambda run_id: FakeLeaseKeeper())
         monkeypatch.setattr(executor, "run_observability_recording", fake_record)
         monkeypatch.setattr(executor, "dispatch_webhook_callback", fake_webhook)
 

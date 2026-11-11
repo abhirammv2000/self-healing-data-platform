@@ -165,53 +165,52 @@ async def test_a_database_error_rolls_back_and_the_action_is_not_reported(starte
 async def test_the_route_queues_the_run_the_recommendation_started(monkeypatch):
     from control_plane.app.routes import agent_recommendations as route
 
-    pushed = []
+    queued = []
 
-    async def rpush(queue, value):
-        pushed.append((queue, value))
+    async def fake_enqueue(run_id):
+        queued.append(run_id)
+        return True
 
     async def fake_service(tenant_id, rec_id, rec_data, session):
         return SimpleNamespace(enqueue_run_id=42)
 
-    monkeypatch.setattr(route, "redis_client", SimpleNamespace(rpush=rpush))
+    monkeypatch.setattr(route, "enqueue_run", fake_enqueue)
     monkeypatch.setattr(route, "update_agent_recommendation_service", fake_service)
 
     result = await route.update_agent_recommendation(1, 7, update("applied"), session=None)
 
-    assert pushed == [("pipeline_runs", "42")] and result.enqueue_run_id == 42
+    assert queued == [42] and result.enqueue_run_id == 42
 
 
 async def test_the_route_queues_nothing_when_no_run_was_started(monkeypatch):
     from control_plane.app.routes import agent_recommendations as route
 
-    pushed = []
+    queued = []
 
     async def fake_service(tenant_id, rec_id, rec_data, session):
         return SimpleNamespace(enqueue_run_id=None)
 
-    monkeypatch.setattr(route, "redis_client", SimpleNamespace(rpush=AsyncMock(side_effect=lambda *a: pushed.append(a))))
+    monkeypatch.setattr(route, "enqueue_run", AsyncMock(side_effect=lambda run_id: queued.append(run_id)))
     monkeypatch.setattr(route, "update_agent_recommendation_service", fake_service)
 
     await route.update_agent_recommendation(1, 7, update("dismissed"), session=None)
 
-    assert pushed == []
+    assert queued == []
 
 
-async def test_the_route_tells_the_caller_when_the_queue_is_down(monkeypatch):
-    from fastapi import HTTPException
-
+async def test_the_route_still_succeeds_when_the_queue_is_down(monkeypatch):
+    # the run is saved, and the reaper in the worker puts it on the queue. The caller has nothing to do by hand.
     from control_plane.app.routes import agent_recommendations as route
 
     async def fake_service(tenant_id, rec_id, rec_data, session):
         return SimpleNamespace(enqueue_run_id=42)
 
-    monkeypatch.setattr(route, "redis_client", SimpleNamespace(rpush=AsyncMock(side_effect=RuntimeError("redis down"))))
+    monkeypatch.setattr(route, "enqueue_run", AsyncMock(return_value=False))
     monkeypatch.setattr(route, "update_agent_recommendation_service", fake_service)
 
-    with pytest.raises(HTTPException) as error:
-        await route.update_agent_recommendation(1, 7, update("applied"), session=None)
+    result = await route.update_agent_recommendation(1, 7, update("applied"), session=None)
 
-    assert error.value.status_code == 500 and "Start the run by hand" in error.value.detail
+    assert result.enqueue_run_id == 42
 
 
 async def test_the_route_reports_an_already_decided_recommendation_as_a_client_error(monkeypatch):

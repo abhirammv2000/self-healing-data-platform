@@ -3,7 +3,9 @@
 The order of events:
 
   1. A run that does not exist is refused. If the pipeline's circuit breaker is open, the run is blocked.
-  2. The run is claimed (queued -> running), so two workers can never take the same run.
+  2. The run is claimed (queued -> running), so two workers can never take the same run. The claim also gives the
+     run a lease that the worker keeps extending while it works. If the worker stops, the lease runs out and the
+     reaper (worker/app/reaper.py) takes the run back.
   3. Each step runs in order. A failed step is retried with backoff if its config allows it.
   4. On success the run is marked done and a half-open circuit breaker is closed.
   5. On failure the run is marked failed, the circuit breaker is updated, and the original error is raised.
@@ -24,11 +26,13 @@ from control_plane.app.models.pipeline_runs import PipelineRun
 from control_plane.app.models.pipeline_steps import PipelineStep
 from control_plane.app.models.pipelines import Pipeline
 from shared import metrics
+from shared.config import RUN_LEASE_SECONDS
 from shared.db import async_session
 from shared.observability import get_logger, get_tracer
 from shared.utils import now_naive
 from shared.webhook_dispatcher import dispatch_webhook_callback
 from worker.app.exceptions import InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
+from worker.app.lease import start_lease_keeper
 from worker.app.step_handlers import step_registry
 
 log = get_logger(__name__)
@@ -67,6 +71,7 @@ async def _run_executor_service(run_id: int):
         if not pipeline_run:
             raise ValueError(f"Pipeline run {run_id} not found")
 
+        lease_keeper = start_lease_keeper(run_id)
         try:
             # this dictionary is passed from step to step: earlier steps write values, later steps read them
             run_context = {
@@ -90,6 +95,7 @@ async def _run_executor_service(run_id: int):
             raise  # the original error goes to the caller
 
         finally:
+            await lease_keeper.stop()
             await _finish_run(session, run_id, pipeline_run, run_context)
 
 
@@ -150,7 +156,13 @@ async def _claim_run(session, run_id):
     result = await session.execute(
         update(PipelineRun)
         .where(PipelineRun.id == run_id, PipelineRun.status == "queued")
-        .values(status="running", started_at=now, updated_at=now)
+        .values(
+            status="running",
+            started_at=now,
+            updated_at=now,
+            attempts=PipelineRun.attempts + 1,
+            lease_expires_at=func.now() + timedelta(seconds=RUN_LEASE_SECONDS),
+        )
     )
     await session.commit()
     return result.rowcount

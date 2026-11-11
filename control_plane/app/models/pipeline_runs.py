@@ -1,7 +1,7 @@
 from shared.db import Base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from sqlalchemy import ForeignKey, String, Text, Integer, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, Integer, UniqueConstraint, func
 
 class PipelineRun(Base):
     __tablename__="pipeline_runs"
@@ -24,6 +24,11 @@ class PipelineRun(Base):
     # Client-supplied via the Idempotency-Key header on POST. A duplicate submission for the
     # same pipeline and key returns the existing run instead of creating a second one.
     idempotency_key: Mapped[str|None]=mapped_column(String(255), nullable=True)
+    # When the run id was last put on the queue, and until when the worker that claimed the run owns it. Both are
+    # compared only with the database's own now(), see worker/app/reaper.py. attempts counts the claims.
+    last_enqueued_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int]=mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 
     pipeline=relationship("Pipeline", back_populates="pipeline_runs")

@@ -5,7 +5,7 @@ from control_plane.app.services.agent_recommendations import get_agent_recommend
 from control_plane.app.schemas.agent_recommendations import AgentRecommendationResponse, AgentRecommendationUpdate
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from typing import List
-from shared.redis_client import redis_client
+from shared.run_queue import enqueue_run
 
 run_recommendations_router=APIRouter()
 pipeline_recommendations_router=APIRouter()
@@ -86,9 +86,7 @@ async def update_agent_recommendation(tenant_id: int, rec_id: int, rec_data: Age
 
     #a retry created a run, so put it on the queue the worker reads
     if getattr(agent_recommendation, "enqueue_run_id", None) is not None:
-        try:
-            await redis_client.rpush("pipeline_runs", str(agent_recommendation.enqueue_run_id))
-        except Exception:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="The recommendation was applied and a run was created, but it could not be queued. Start the run by hand.")
+        #if Redis is down the run is still saved, and the reaper in the worker puts it on the queue. No need to start it by hand.
+        await enqueue_run(agent_recommendation.enqueue_run_id)
     
     return agent_recommendation

@@ -1,5 +1,9 @@
 from worker.app.executor import run_executor_service
+from worker.app.exceptions import InvalidPipelineRunStatusError
+from worker.app.reaper import reaper_loop
+from shared.config import WORKER_METRICS_PORT
 from shared.redis_client import redis_client
+from shared.run_queue import QUEUE_NAME
 from shared.observability import setup_tracing, setup_logging, get_logger
 from prometheus_client import start_http_server
 import asyncio
@@ -28,12 +32,18 @@ log=get_logger(__name__)
 #only the control plane was scraped, because they're incremented in this process. So the worker
 #needs its own scrape target. start_http_server is the standard prometheus_client pattern for a
 #long-running background process, see observability/prometheus.yml's second job.
-start_http_server(8001)
+start_http_server(WORKER_METRICS_PORT)
 
-QUEUE_NAME="pipeline_runs"
+BACKGROUND_TASKS=[]
 
 async def main():
-    log.info("worker_started", queue=QUEUE_NAME)
+    log.info("worker_started", queue=QUEUE_NAME, metrics_port=WORKER_METRICS_PORT)
+
+    #the reaper gets back runs that the queue or another worker lost, see worker/app/reaper.py. Every worker runs
+    #one, which is safe because the rows it takes are locked and a run can only be claimed once.
+    #the task is kept in a list because asyncio only holds a weak reference to a running task, and it could be
+    #collected while the loop below runs
+    BACKGROUND_TASKS.append(asyncio.create_task(reaper_loop()))
 
     while True:
         try:
@@ -48,6 +58,9 @@ async def main():
 
             try:
                 await run_executor_service(run_id)
+            except InvalidPipelineRunStatusError as e:
+                #the id was on the queue more than once, or the run was claimed by someone else first. Not a failure.
+                log.info("run_already_handled", run_id=run_id, detail=str(e))
             except Exception as e: #generic exception for now
                 log.error("run_execution_failed", run_id=run_id, error=str(e))
 
