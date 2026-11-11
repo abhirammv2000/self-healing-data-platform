@@ -70,7 +70,7 @@ A couple of intentional schema decisions worth calling out:
 1. **Enqueue**: the control plane creates a `pipeline_run` (`status="queued"`) and pushes its `run_id` onto the Redis `pipeline_runs` queue.
 2. **Pick up**: the worker's `BLPOP` loop receives the `run_id`.
 3. **Circuit-breaker gate**: if the pipeline's breaker is `open`, the run is marked `blocked` and execution stops.
-4. **Atomic claim**: the run is flipped `queued -> running` in a single conditional `UPDATE`, so two workers can never both claim the same run.
+4. **Atomic claim**: the run is flipped `queued -> running` in a single conditional `UPDATE`, so two workers can never both claim the same run. The claim also counts the attempt and sets a lease that the worker keeps extending; a reaper in every worker takes back runs whose lease ran out and re-queues runs that never reached the queue, and a scheduler in every worker starts runs when a cron time comes. See [RELIABILITY.md](RELIABILITY.md).
 5. **Execute steps**: steps run in `step_order`. Each step retries per its config (exponential backoff, optionally with jitter). Every attempt is recorded in `run_context["step_attempts"]`.
 6. **Resolve outcome**:
    - **Success:** run marked `success`.
