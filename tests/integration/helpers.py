@@ -119,3 +119,49 @@ async def set_breaker(pipeline_id, **fields):
             text(f"update pipeline_circuit_breakers set {', '.join(assignments)} where pipeline_id = :id"), params
         )
         await session.commit()
+
+
+async def make_schedule(tenant_id, pipeline_id, cron="* * * * *", time_zone="UTC"):
+    """A schedule made the way the API makes it, so it starts from now."""
+    from control_plane.app.schemas.schedules import ScheduleCreate
+    from control_plane.app.services.schedules import create_schedule_service
+
+    async with async_session() as session:
+        schedule = await create_schedule_service(
+            tenant_id, pipeline_id, ScheduleCreate(cron_expression=cron, timezone=time_zone), session
+        )
+    return schedule.id
+
+
+async def set_schedule(schedule_id, **fields):
+    """Write columns of a schedule directly. The same 'sql:' convention as set_run."""
+    assignments, params = [], {"id": schedule_id}
+    for name, value in fields.items():
+        if isinstance(value, str) and value.startswith("sql:"):
+            assignments.append(f"{name} = {value[4:]}")
+        else:
+            assignments.append(f"{name} = :{name}")
+            params[name] = value
+    async with async_session() as session:
+        await session.execute(text(f"update schedules set {', '.join(assignments)} where id = :id"), params)
+        await session.commit()
+
+
+async def get_schedule(schedule_id):
+    from control_plane.app.models.schedules import Schedule
+
+    async with async_session() as session:
+        return (await session.execute(select(Schedule).where(Schedule.id == schedule_id))).scalar_one()
+
+
+async def runs_of(pipeline_id):
+    async with async_session() as session:
+        return (
+            await session.execute(
+                select(PipelineRun).where(PipelineRun.pipeline_id == pipeline_id).order_by(PipelineRun.id)
+            )
+        ).scalars().all()
+
+
+async def redis_clear_queue():
+    await redis_client.delete(QUEUE_NAME)

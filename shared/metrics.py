@@ -43,11 +43,16 @@ diagnostic_agent_llm_tokens_total = Counter(
 circuit_breaker_transitions_total = Counter(
     "circuit_breaker_transitions_total",
     "Circuit breaker state transitions, counted at the moment a pipeline's breaker changes state.",
-    ["to_state"],  # "open" or "closed", the only two transitions executor.py triggers
+    ["to_state"],  # "open", "half-open" or "closed", the three transitions executor.py triggers
 )
 
 pipeline_runs_recovered_total = Counter(
     "pipeline_runs_recovered_total",
     "Runs the reaper found lost and dealt with. Every one of these is a run that would otherwise have been stuck.",
     ["reason"],  # queued_again, requeued_worker_lost or failed_worker_lost
+)
+
+scheduled_runs_total = Counter(
+    "scheduled_runs_total",
+    "Runs the scheduler started because a pipeline's cron time came.",
 )

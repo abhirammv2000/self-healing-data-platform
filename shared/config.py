@@ -46,3 +46,5 @@ ENQUEUE_VISIBILITY_SECONDS = _positive_int("ENQUEUE_VISIBILITY_SECONDS", 30)
 RUN_MAX_ATTEMPTS = _positive_int("RUN_MAX_ATTEMPTS", 3)
 # the port a worker serves /metrics on. Two workers on one machine need different ports
 WORKER_METRICS_PORT = _positive_int("WORKER_METRICS_PORT", 8001)
+# how often a worker checks whether a schedule is due. A run starts at most this long after its cron time
+SCHEDULER_INTERVAL_SECONDS = _positive_int("SCHEDULER_INTERVAL_SECONDS", 10)

@@ -1,6 +1,7 @@
 from worker.app.executor import run_executor_service
 from worker.app.exceptions import InvalidPipelineRunStatusError
 from worker.app.reaper import reaper_loop
+from worker.app.scheduler import scheduler_loop
 from shared.config import WORKER_METRICS_PORT
 from shared.redis_client import redis_client
 from shared.run_queue import QUEUE_NAME
@@ -44,6 +45,9 @@ async def main():
     #the task is kept in a list because asyncio only holds a weak reference to a running task, and it could be
     #collected while the loop below runs
     BACKGROUND_TASKS.append(asyncio.create_task(reaper_loop()))
+    #the scheduler starts a run when a pipeline's cron time comes, see worker/app/scheduler.py. Every worker runs
+    #one, which is safe because the run for one cron time is created once, whoever tries
+    BACKGROUND_TASKS.append(asyncio.create_task(scheduler_loop()))
 
     while True:
         try:
