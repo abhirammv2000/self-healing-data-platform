@@ -7,7 +7,8 @@ The order of events:
      run a lease that the worker keeps extending while it works. If the worker stops, the lease runs out and the
      reaper (worker/app/reaper.py) takes the run back.
   3. Each step runs in order. A failed step is retried with backoff if its config allows it.
-  4. On success the run is marked done and a half-open circuit breaker is closed.
+  4. On success the run is marked done and a half-open circuit breaker is closed. (An open breaker whose retry
+     time has passed becomes half-open when the next run arrives, and that run is the trial.)
   5. On failure the run is marked failed, the circuit breaker is updated, and the original error is raised.
   6. Either way, the run is saved to disk, the diagnostic agent looks at a failure, and the webhook is sent.
      None of those can change the outcome of the run.
@@ -55,8 +56,10 @@ async def _run_executor_service(run_id: int):
 
             circuit_breaker = await _fetch_circuit_breaker(session, pipeline_id)
             if circuit_breaker and circuit_breaker.state == "open":
-                # nothing below this point runs for a blocked run: no steps, no agent, no webhook
-                return await _block_run(session, run_id, pipeline_id)
+                # an open breaker whose wait is over lets this run through as the trial (it becomes half-open)
+                if not await _half_open_if_due(session, circuit_breaker):
+                    # nothing below this point runs for a blocked run: no steps, no agent, no webhook
+                    return await _block_run(session, run_id, pipeline_id)
 
             claimed_rows = await _claim_run(session, run_id)
         except SQLAlchemyError:
@@ -119,6 +122,36 @@ async def _fetch_steps(session, pipeline_id):
         select(PipelineStep).where(PipelineStep.pipeline_id == pipeline_id).order_by(PipelineStep.step_order)
     )
     return result.scalars().all()
+
+
+async def _half_open_if_due(session, circuit_breaker) -> bool:
+    """Move an open breaker to half-open once its retry_after time has passed. True means the run may go ahead.
+
+    A breaker with no retry_after was opened by hand and stays open until a person changes it. The change is one
+    conditional UPDATE, so when several workers get here together exactly one makes it, and the others see the
+    breaker already half-open and go ahead too. While it is half-open every run is let through, and the first
+    to finish decides: a success closes the breaker and a failure opens it again for another full wait.
+    """
+    now = now_naive()
+    if circuit_breaker.retry_after is None or circuit_breaker.retry_after > now:
+        return False
+    pipeline_id = circuit_breaker.pipeline_id
+    result = await session.execute(
+        update(PipelineCircuitBreaker)
+        .where(
+            PipelineCircuitBreaker.pipeline_id == pipeline_id,
+            PipelineCircuitBreaker.state == "open",
+            PipelineCircuitBreaker.retry_after <= now,
+        )
+        .values(state="half-open", updated_at=now)
+    )
+    await session.commit()
+    # the session does not expire objects on commit, so reload the breaker to show what the database says now
+    await session.refresh(circuit_breaker)
+    if result.rowcount == 1:
+        metrics.circuit_breaker_transitions_total.labels(to_state="half-open").inc()
+        log.info("circuit_breaker_half_open", pipeline_id=pipeline_id)
+    return circuit_breaker.state != "open"
 
 
 async def _block_run(session, run_id, pipeline_id):

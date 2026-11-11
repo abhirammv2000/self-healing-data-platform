@@ -52,11 +52,14 @@ class FakeDatabase:
         self.failed_runs = failed_runs
         self.commits = 0
         self.rollbacks = 0
+        self.another_worker_first = False
 
     async def execute(self, statement):
         sql = str(statement)
         if sql.startswith("UPDATE pipeline_runs"):
             return self._update_run(statement)
+        if sql.startswith("UPDATE pipeline_circuit_breakers"):
+            return self._update_breaker(statement)
         if "count(" in sql:
             return FakeResult(self.failed_runs)
         if "FROM pipeline_circuit_breakers" in sql:
@@ -78,6 +81,21 @@ class FakeDatabase:
         for column, value in params.items():
             if not column.endswith("_1") and column != "id":
                 setattr(self.run, column, value)
+        return FakeResult(rowcount=1)
+
+    def _update_breaker(self, statement):
+        """The open -> half-open UPDATE: changes the breaker only if it is open and its retry time has passed.
+
+        `another_worker_first` plays two workers arriving together: the other one's UPDATE lands just before ours.
+        """
+        params = statement.compile().params
+        if self.another_worker_first and self.breaker.state == "open":
+            self.breaker.state = "half-open"
+            return FakeResult(rowcount=0)
+        if self.breaker.state != params["state_1"] or self.breaker.retry_after is None                 or self.breaker.retry_after > params["retry_after_1"]:
+            return FakeResult(rowcount=0)
+        self.breaker.state = params["state"]
+        self.breaker.updated_at = params["updated_at"]
         return FakeResult(rowcount=1)
 
     async def commit(self):
@@ -185,10 +203,11 @@ def step(order, step_type, **config):
     return SimpleNamespace(step_order=order, step_type=step_type, config=config)
 
 
-def breaker(state="closed", threshold=3, window=60):
+def breaker(state="closed", threshold=3, window=60, retry_after=NOW + timedelta(minutes=10)):
+    """By default an open or half-open breaker still has ten minutes to wait."""
     return SimpleNamespace(
         pipeline_id=7, state=state, failure_reason="old reason" if state != "closed" else None,
-        retry_after=NOW if state != "closed" else None, updated_at=None,
+        retry_after=retry_after if state != "closed" else None, updated_at=None,
         failure_count_threshold=threshold, failure_window_minutes=window,
     )
 
@@ -390,6 +409,87 @@ async def test_an_open_breaker_does_not_overwrite_a_run_that_is_no_longer_queued
         await h.run()
 
     assert h.database.run.status == "running"
+
+
+# ---- an open breaker whose wait is over ----
+
+
+async def test_an_open_breaker_whose_wait_is_over_goes_half_open_and_lets_the_run_through(harness):
+    due = breaker("open", retry_after=NOW - timedelta(seconds=1))
+    h = harness([step(1, "ok")], due)
+
+    await h.run()
+
+    assert h.calls == ["ok"] and h.database.run.status == "success"
+    assert due.state == "closed"  # it went half-open for this run, and the success closed it
+    assert due.failure_reason is None and due.retry_after is None
+
+
+async def test_the_wait_ending_exactly_now_counts_as_over(harness):
+    due = breaker("open", retry_after=NOW)
+
+    await harness([step(1, "ok")], due).run()
+
+    assert due.state == "closed"
+
+
+async def test_the_trial_run_leaves_the_breaker_half_open_while_it_runs(harness):
+    due = breaker("open", retry_after=NOW - timedelta(minutes=1))
+    h = harness([step(1, "ok")], due)
+    seen = []
+
+    async def look(config, context):
+        seen.append(due.state)
+
+    executor.step_registry["look"] = look
+    try:
+        h.database.steps = [step(1, "look")]
+        await h.run()
+    finally:
+        del executor.step_registry["look"]
+
+    assert seen == ["half-open"]
+    assert due.updated_at == NOW
+
+
+async def test_a_failed_trial_run_opens_the_breaker_again_for_a_full_wait(harness):
+    due = breaker("open", threshold=3, window=60, retry_after=NOW - timedelta(minutes=1))
+    h = harness([step(1, "boom")], due)
+
+    with pytest.raises(RuntimeError):
+        await h.run()
+
+    assert due.state == "open"
+    assert due.retry_after == NOW + timedelta(minutes=60)
+
+
+async def test_an_open_breaker_that_is_still_waiting_blocks_the_run(harness):
+    waiting = breaker("open", retry_after=NOW + timedelta(seconds=1))
+    h = harness([step(1, "ok")], waiting)
+
+    await h.run()
+
+    assert h.database.run.status == "blocked" and h.calls == []
+    assert waiting.state == "open"
+
+
+async def test_a_breaker_opened_by_hand_without_a_retry_time_stays_open(harness):
+    by_hand = breaker("open", retry_after=None)
+    h = harness([step(1, "ok")], by_hand)
+
+    await h.run()
+
+    assert h.database.run.status == "blocked" and by_hand.state == "open"
+
+
+async def test_when_another_worker_made_it_half_open_first_this_run_goes_ahead_too(harness):
+    due = breaker("open", retry_after=NOW - timedelta(seconds=1))
+    h = harness([step(1, "ok")], due)
+    h.database.another_worker_first = True
+
+    await h.run()
+
+    assert h.database.run.status == "success" and h.calls == ["ok"]
 
 
 # ---- a run that cannot be claimed ----

@@ -94,3 +94,28 @@ async def work(workers=1, wait=1.0):
 
     await asyncio.gather(*(one_worker() for _ in range(workers)))
     return already_handled
+
+
+async def get_breaker(pipeline_id):
+    from control_plane.app.models.pipeline_circuit_breakers import PipelineCircuitBreaker
+
+    async with async_session() as session:
+        return (
+            await session.execute(select(PipelineCircuitBreaker).where(PipelineCircuitBreaker.pipeline_id == pipeline_id))
+        ).scalar_one()
+
+
+async def set_breaker(pipeline_id, **fields):
+    """Write columns of a pipeline's breaker directly. The same 'sql:' convention as set_run."""
+    assignments, params = [], {"id": pipeline_id}
+    for name, value in fields.items():
+        if isinstance(value, str) and value.startswith("sql:"):
+            assignments.append(f"{name} = {value[4:]}")
+        else:
+            assignments.append(f"{name} = :{name}")
+            params[name] = value
+    async with async_session() as session:
+        await session.execute(
+            text(f"update pipeline_circuit_breakers set {', '.join(assignments)} where pipeline_id = :id"), params
+        )
+        await session.commit()
