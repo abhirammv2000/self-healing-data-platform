@@ -94,9 +94,16 @@ async def test_runs_arriving_together_when_the_wait_ends_all_take_the_transition
 
     await asyncio.gather(*(run_executor_service(run_id) for run_id in run_ids))
 
+    # one run of the pipeline runs at a time, so one finished and the rest were left queued to wait their turn.
+    # None of them was blocked by the breaker in the race
     runs = [await helpers.get_run(run_id) for run_id in run_ids]
-    assert [run.status for run in runs] == ["success"] * workers  # none was blocked in the race
+    assert {run.status for run in runs} <= {"success", "queued"}
+    assert "success" in {run.status for run in runs}
     assert (await helpers.get_breaker(pipeline)).state == "closed"
+
+    await helpers.work()  # the waiting runs were put back on the queue as the pipeline became free
+    runs = [await helpers.get_run(run_id) for run_id in run_ids]
+    assert [run.status for run in runs] == ["success"] * workers
 
 
 async def test_a_worker_that_lost_the_race_sees_the_breaker_the_winner_made_half_open(world):

@@ -56,3 +56,8 @@ scheduled_runs_total = Counter(
     "scheduled_runs_total",
     "Runs the scheduler started because a pipeline's cron time came.",
 )
+
+pipeline_runs_deferred_total = Counter(
+    "pipeline_runs_deferred_total",
+    "Times a worker took a run off the queue and left it queued because another run of the same pipeline was running.",
+)

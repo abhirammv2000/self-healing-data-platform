@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from worker.app import executor
 from worker.app.exceptions import InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
@@ -56,6 +57,7 @@ class FakeDatabase:
         self.commits = 0
         self.rollbacks = 0
         self.another_worker_first = False
+        self.claim_error = None  # the database error a claim of the run raises, if any
 
     async def execute(self, statement):
         sql = str(statement)
@@ -84,6 +86,8 @@ class FakeDatabase:
         required_status = params["status_1"]
         if self.run is None or self.run.status != required_status:
             return FakeResult(rowcount=0)
+        if params.get("status") == "running" and self.claim_error:
+            raise IntegrityError("UPDATE pipeline_runs", {}, Exception(self.claim_error))
         for column, value in params.items():
             if not column.endswith("_1") and column != "id":
                 setattr(self.run, column, value)
@@ -147,6 +151,7 @@ class Harness:
     recorded: list = field(default_factory=list)
     webhooks: list = field(default_factory=list)
     agent: AsyncMock = None
+    woken: AsyncMock = None
     calls: list = field(default_factory=list)
 
     async def run(self):
@@ -192,6 +197,8 @@ def harness(monkeypatch):
         monkeypatch.setattr(executor, "now_naive", lambda: NOW)
         monkeypatch.setattr(executor, "asyncio", SimpleNamespace(sleep=fake_sleep, create_task=lambda coro: coro))
         monkeypatch.setattr(executor, "start_lease_keeper", lambda run_id, attempt: FakeLeaseKeeper())
+        h.woken = AsyncMock()  # the queue is not part of these tests
+        monkeypatch.setattr(executor, "wake_waiting_run", h.woken)
         monkeypatch.setattr(executor, "run_observability_recording", fake_record)
         monkeypatch.setattr(executor, "dispatch_webhook_callback", fake_webhook)
 
@@ -503,6 +510,37 @@ async def test_when_another_worker_made_it_half_open_first_this_run_goes_ahead_t
     assert h.database.run.status == "success" and h.calls == ["ok"]
 
 
+# ---- the next waiting run is woken when a pipeline becomes free ----
+
+
+async def test_when_a_run_succeeds_the_next_waiting_run_of_its_pipeline_is_woken(harness):
+    h = harness([step(1, "ok")])
+
+    await h.run()
+
+    h.woken.assert_awaited_once_with(7)
+
+
+async def test_when_a_run_fails_the_next_waiting_run_of_its_pipeline_is_woken_too(harness):
+    h = harness([step(1, "boom")])
+
+    with pytest.raises(RuntimeError):
+        await h.run()
+
+    h.woken.assert_awaited_once_with(7)
+
+
+async def test_a_run_that_was_blocked_or_made_to_wait_wakes_nobody(harness):
+    blocked = harness([step(1, "ok")], breaker("open"))
+    await blocked.run()
+    waiting = harness([step(1, "ok")])
+    waiting.database.claim_error = 'duplicate key value violates unique constraint "uq_pipeline_runs_one_active"'
+    await waiting.run()
+
+    blocked.woken.assert_not_awaited()
+    waiting.woken.assert_not_awaited()
+
+
 # ---- a worker that lost its lease must not write ----
 
 
@@ -530,6 +568,7 @@ async def test_a_worker_whose_run_was_taken_over_does_not_mark_it_a_success(harn
     assert h.database.run.ended_at is None
     assert h.recorded == [] and h.webhooks == []
     h.agent.assert_not_awaited()
+    h.woken.assert_not_awaited()  # the pipeline is not free: the other worker has the run
 
 
 async def test_a_worker_whose_run_was_taken_over_does_not_fail_it_or_trip_the_breaker(harness, monkeypatch):
@@ -603,6 +642,45 @@ async def test_the_heartbeat_gets_the_attempt_number_of_the_claim_and_the_writes
     assert started == [(1, 5)]
     assert h.database.run.status == "success" and h.database.run.attempts == 5
     assert h.recorded[0]["attempt"] == 5
+
+
+# ---- a pipeline that already has a run going ----
+
+BUSY = 'duplicate key value violates unique constraint "uq_pipeline_runs_one_active"'
+
+
+async def test_a_run_whose_pipeline_already_has_a_run_going_is_left_queued_to_wait_its_turn(harness):
+    h = harness([step(1, "ok")], callback_url="https://hook")
+    h.database.claim_error = BUSY
+
+    result = await h.run()  # not an error: the run just waits
+
+    assert result is h.database.run
+    assert h.database.run.status == "queued" and h.database.run.attempts == 0
+    assert h.database.run.updated_at == NOW  # marked as put back, so the reaper tries it again later
+    assert h.calls == [] and h.recorded == [] and h.webhooks == []
+    h.agent.assert_not_awaited()
+    assert h.database.rollbacks == 1  # the failed claim was rolled back before anything else
+
+
+async def test_a_database_error_on_the_claim_that_is_not_about_a_busy_pipeline_is_raised(harness):
+    h = harness([step(1, "ok")])
+    h.database.claim_error = 'duplicate key value violates unique constraint "something_else"'
+
+    with pytest.raises(IntegrityError):
+        await h.run()
+
+    assert h.database.run.status == "queued"
+
+
+async def test_a_busy_pipeline_does_not_block_the_run_when_the_breaker_is_open_and_still_waiting(harness):
+    # a run for an open breaker is blocked without being claimed, so a busy pipeline never matters to it
+    h = harness([step(1, "ok")], breaker("open"))
+    h.database.claim_error = BUSY
+
+    await h.run()
+
+    assert h.database.run.status == "blocked"
 
 
 # ---- a run that cannot be claimed ----

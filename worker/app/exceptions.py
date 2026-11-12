@@ -29,3 +29,7 @@ class ObservabilityRecordingError(Exception):
 class LeaseLostError(Exception):
     """Raised when this worker no longer owns the run: its lease ran out and another worker took the run over"""
     pass
+
+class PipelineBusyError(Exception):
+    """Raised when a run cannot start because another run of the same pipeline is running"""
+    pass

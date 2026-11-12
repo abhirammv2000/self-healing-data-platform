@@ -20,7 +20,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from control_plane.app.models.pipeline_circuit_breakers import PipelineCircuitBreaker
 from control_plane.app.models.pipeline_runs import PipelineRun
@@ -32,7 +32,8 @@ from shared.db import async_session
 from shared.observability import get_logger, get_tracer
 from shared.utils import now_naive
 from shared.webhook_dispatcher import dispatch_webhook_callback
-from worker.app.exceptions import LeaseLostError, InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
+from worker.app.exceptions import LeaseLostError, PipelineBusyError, InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
+from shared.run_queue import wake_waiting_run
 from worker.app.lease import start_lease_keeper
 from worker.app.step_handlers import step_registry
 
@@ -61,7 +62,11 @@ async def _run_executor_service(run_id: int):
                     # nothing below this point runs for a blocked run: no steps, no agent, no webhook
                     return await _block_run(session, run_id, pipeline_id)
 
-            attempt = await _claim_run(session, run_id)
+            try:
+                attempt = await _claim_run(session, run_id)
+            except PipelineBusyError:
+                # another run of this pipeline is running: this one waits its turn and is put back on the queue later
+                return await _defer_run(session, run_id, pipeline_id)
         except SQLAlchemyError:
             await session.rollback()
             raise
@@ -118,6 +123,9 @@ async def _run_executor_service(run_id: int):
         finally:
             await lease_keeper.stop()
             if not lease_lost:
+                # the pipeline is free as soon as the run has ended, so the next waiting run is offered before the
+                # slow part (the agent and the webhook) rather than after it
+                await wake_waiting_run(pipeline_id)
                 await _finish_run(session, run_id, pipeline_run, run_context)
 
 
@@ -206,20 +214,44 @@ async def _claim_run(session, run_id):
     'queued' and both run it.
     """
     now = now_naive()
-    result = await session.execute(
+    try:
+        result = await session.execute(
+            update(PipelineRun)
+            .where(PipelineRun.id == run_id, PipelineRun.status == "queued")
+            .values(
+                status="running",
+                started_at=now,
+                updated_at=now,
+                attempts=PipelineRun.attempts + 1,
+                lease_expires_at=func.now() + timedelta(seconds=RUN_LEASE_SECONDS),
+            )
+            .returning(PipelineRun.attempts)
+        )
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        # the database allows one active run per pipeline (uq_pipeline_runs_one_active), and another one has it
+        if "uq_pipeline_runs_one_active" in str(error.orig):
+            raise PipelineBusyError(f"another run of the pipeline of run {run_id} is running") from None
+        raise
+    return result.scalar_one_or_none()
+
+
+async def _defer_run(session, run_id, pipeline_id):
+    """Leave a run queued because its pipeline already has a run going, and return the run.
+
+    Its id was taken off the queue, so it is marked as put on the queue just now. The reaper puts it back after
+    ENQUEUE_VISIBILITY_SECONDS, which also keeps a run that waits a long time from being tried again and again.
+    """
+    await session.execute(
         update(PipelineRun)
         .where(PipelineRun.id == run_id, PipelineRun.status == "queued")
-        .values(
-            status="running",
-            started_at=now,
-            updated_at=now,
-            attempts=PipelineRun.attempts + 1,
-            lease_expires_at=func.now() + timedelta(seconds=RUN_LEASE_SECONDS),
-        )
-        .returning(PipelineRun.attempts)
+        .values(last_enqueued_at=func.now(), updated_at=now_naive())
     )
     await session.commit()
-    return result.scalar_one_or_none()
+    metrics.pipeline_runs_deferred_total.inc()
+    log.info("pipeline_run_deferred", run_id=run_id, pipeline_id=pipeline_id, reason="pipeline_busy")
+    return await _fetch_run(session, run_id)
 
 
 async def _raise_run_not_claimable(session, run_id):

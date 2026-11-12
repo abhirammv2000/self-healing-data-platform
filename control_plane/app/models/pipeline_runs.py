@@ -1,14 +1,23 @@
 from shared.db import Base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, String, Text, Integer, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Integer, UniqueConstraint, func, text
 
 class PipelineRun(Base):
     __tablename__="pipeline_runs"
     # A plain UNIQUE(pipeline_id, idempotency_key) is enough on its own. Postgres treats every
     # NULL as distinct, so the majority of runs (no key supplied) never collide, and only two
     # runs on the same pipeline with the same key do. No partial index needed to exclude NULLs.
-    __table_args__=(UniqueConstraint("pipeline_id", "idempotency_key", name="uq_pipeline_runs_pipeline_id_idempotency_key"),)
+    __table_args__=(
+        UniqueConstraint("pipeline_id", "idempotency_key", name="uq_pipeline_runs_pipeline_id_idempotency_key"),
+        # At most one run of a pipeline is running at a time. This is the lock: claiming a second run of the pipeline
+        # fails in the database, whichever worker tries, and it is released when the run stops being active
+        # (it ends, or the reaper takes it back from a dead worker). See worker/app/executor.py _claim_run.
+        Index(
+            "uq_pipeline_runs_one_active", "pipeline_id", unique=True,
+            postgresql_where=text("status IN ('running', 'retrying')"),
+        ),
+    )
 
     id: Mapped[int]=mapped_column(primary_key=True)
     tenant_id: Mapped[int]=mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)

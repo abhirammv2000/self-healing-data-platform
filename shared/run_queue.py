@@ -5,7 +5,7 @@ fail after the first has worked, and the run would sit in the database with noth
 the run is already durable, and a run that did not reach the queue is found by the reaper (worker/app/reaper.py) and
 put there again. So a failed push is not an error for the caller. The run exists and will be started.
 """
-from sqlalchemy import func, update
+from sqlalchemy import func, select, update
 
 from control_plane.app.models.pipeline_runs import PipelineRun
 from shared.db import async_session
@@ -45,3 +45,29 @@ async def mark_enqueued(run_id: int) -> None:
             await session.commit()
     except Exception as error:
         log.warning("enqueue_not_recorded", run_id=run_id, error=str(error))
+
+
+async def wake_waiting_run(pipeline_id: int) -> bool:
+    """A run of the pipeline just ended, so the pipeline is free: put the oldest queued run of it on the queue now.
+
+    A pipeline runs one run at a time, and a run that finds its pipeline busy is left queued (worker/app/executor.py).
+    Without this it would wait for the reaper to offer it again, up to ENQUEUE_VISIBILITY_SECONDS later, and a burst of
+    runs for one pipeline would crawl. The id may already be on the queue, which is harmless: only one claim wins.
+    Never raises. If it fails, the reaper offers the waiting run later.
+    """
+    try:
+        async with async_session() as session:
+            run_id = (
+                await session.execute(
+                    select(PipelineRun.id)
+                    .where(PipelineRun.pipeline_id == pipeline_id, PipelineRun.status == "queued")
+                    .order_by(PipelineRun.id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+    except Exception as error:
+        log.warning("wake_waiting_run_failed", pipeline_id=pipeline_id, error=str(error))
+        return False
+    if run_id is None:
+        return False
+    return await enqueue_run(run_id)

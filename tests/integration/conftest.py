@@ -58,6 +58,11 @@ async def clean_state(tmp_path, monkeypatch):
             )
         ).scalars().all()
     assert "handled_until" in schedule_columns, "run `alembic upgrade head` on this database first"
+    async with asyncio_engine.connect() as connection:
+        index = (
+            await connection.execute(text("select 1 from pg_indexes where indexname = 'uq_pipeline_runs_one_active'"))
+        ).scalar()
+    assert index == 1, "run `alembic upgrade head` on this database first"
     # the tests count runs, so they start from nothing. This empties every table that belongs to a tenant
     async with asyncio_engine.begin() as connection:
         await connection.execute(text("TRUNCATE tenants RESTART IDENTITY CASCADE"))

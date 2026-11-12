@@ -1,4 +1,4 @@
-"""Break worker/app/executor.py in 24 specific ways and check that the executor tests notice each one.
+"""Break worker/app/executor.py in 29 specific ways and check that the executor tests notice each one.
 
 A test suite that passes proves little if it would also pass with a bug in the code. This breaks the executor on
 purpose (a backoff delay off by one, a breaker that opens a failure too late, a run marked with the wrong status,
@@ -58,6 +58,16 @@ MUTATIONS = [
     ("a worker that lost the run goes on to the next step",
      "                if lease_keeper.lost:\n                    raise LeaseLostError(f\"run {run_id} was taken over by another worker\")\n",
      ""),
+    ("a run that finds its pipeline busy is not left to wait",
+     '        if "uq_pipeline_runs_one_active" in str(error.orig):', '        if False:'),
+    ("any claim error is read as a busy pipeline",
+     '        if "uq_pipeline_runs_one_active" in str(error.orig):', '        if True:'),
+    ("a failed claim is not rolled back",
+     "    except IntegrityError as error:\n        await session.rollback()\n", "    except IntegrityError as error:\n"),
+    ("the next waiting run is not woken when a run ends",
+     "                await wake_waiting_run(pipeline_id)\n", ""),
+    ("a worker that lost the run wakes the next one",
+     "            if not lease_lost:\n                # the pipeline is free", "            if True:\n                # the pipeline is free"),
     ("failure error is swallowed",
      "raise  # the original error goes to the caller", "pass"),
     ("retry count is not recorded",
@@ -66,11 +76,11 @@ MUTATIONS = [
      'except Exception as error:\n        log.error("diagnostic_agent_failed"',
      'except KeyboardInterrupt as error:\n        log.error("diagnostic_agent_failed"'),
     ("claim sets the wrong status",
-     '.values(\n            status="running",',
-     '.values(\n            status="success",'),
+     '.values(\n                status="running",',
+     '.values(\n                status="success",'),
     ("claim ignores the queued check",
-     '.where(PipelineRun.id == run_id, PipelineRun.status == "queued")\n        .values(\n            status="running",',
-     '.where(PipelineRun.id == run_id)\n        .values(\n            status="running",'),
+     '.where(PipelineRun.id == run_id, PipelineRun.status == "queued")\n            .values(\n                status="running",',
+     '.where(PipelineRun.id == run_id)\n            .values(\n                status="running",'),
     ("failed run not marked failed",
      'pipeline_run.status = "failed"', 'pipeline_run.status = "success"'),
     ("success not marked",
