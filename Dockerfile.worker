@@ -1,12 +1,13 @@
 FROM python:3.12-slim
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 COPY shared/ shared/
 COPY worker/ worker/
@@ -14,4 +15,11 @@ COPY control_plane/ control_plane/
 # worker/app/executor.py imports control_plane.app.models directly (shared SQLAlchemy
 # Base/metadata), so both packages must be in the image.
 
+# The run files are written under /app/data, so the user owns that directory.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin shdp \
+    && mkdir -p /app/data \
+    && chown -R shdp /app
+USER 10001
+
+# python is PID 1 and handles SIGTERM itself (worker/app/main.py): it finishes the run it has, then exits.
 CMD ["python", "-u", "-m", "worker.app.main"]

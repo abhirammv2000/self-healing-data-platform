@@ -14,7 +14,8 @@ Prometheus can't reach the process's `/metrics`. Either the process is down or P
 
 1. Is it running? Locally `python -m worker.app.main`; in Kubernetes `kubectl logs deploy/shdp-worker --tail=100`. A healthy worker logs `worker_started` and then `run_picked_up` for each run.
 2. Its metrics are on port 8001, so `curl http://localhost:8001/metrics` tells you if the process is alive but not scraped.
-3. While it is down, runs pile up in the Redis queue. Check how many: `docker compose exec redis redis-cli LLEN pipeline_runs`. They are picked up in order once the worker is back, so nothing is lost, only delayed. Cron schedules start no runs while every worker is down; when one is back it starts one run for the newest missed time.
+3. A worker that is stopped on purpose (a deploy, a scale-down) logs `worker_shutdown_requested`, finishes the run it has, logs `worker_stopped` and exits with code 0. Kubernetes waits `worker.terminationGracePeriodSeconds` (120) for that. A run that is not done by then is taken back by another worker's reaper once its lease runs out.
+4. While it is down, runs pile up in the Redis queue. Check how many: `docker compose exec redis redis-cli LLEN pipeline_runs`. They are picked up in order once the worker is back, so nothing is lost, only delayed. Cron schedules start no runs while every worker is down; when one is back it starts one run for the newest missed time.
 
 ## After it is back
 

@@ -53,7 +53,11 @@ All configuration is read from environment variables (loaded from `.env` via `py
 | `GOOGLE_API_KEY` | Google AI (Gemini) API key. |
 | `GEMINI_MODEL` | Chat model for the agent (default `gemini-3.6-flash`, switched from `gemini-2.5-flash` on 2026-09-19 after that model started 404ing for this account; see [EVALUATION.md](EVALUATION.md)). |
 | `GEMINI_EMBEDDING_MODEL` | Embedding model for RAG (default `gemini-embedding-001`). |
-| `ENV` | Environment label (default `dev`). |
+| `ENV` | Environment label (default `dev`). With `production`, the two secrets must be 16+ characters and different. |
+| `ALLOW_PRIVATE_URLS` | Default `false`: a pipeline source or webhook may not point at a private address. Set `true` for local development, where the example sources are on `localhost`. See [PRODUCTION.md](PRODUCTION.md). |
+| `MAX_DOWNLOAD_MB`, `DIAGNOSTIC_TIMEOUT_SECONDS` | Optional. The largest file an ingestion step downloads (100) and how long the diagnostic agent may take (120). |
+
+Both programs check these at startup and stop, naming every setting that is missing, instead of failing on the first request that needs one.
 | `RUN_LEASE_SECONDS`, `REAPER_INTERVAL_SECONDS`, `ENQUEUE_VISIBILITY_SECONDS`, `RUN_MAX_ATTEMPTS`, `SCHEDULER_INTERVAL_SECONDS`, `WORKER_METRICS_PORT` | Optional. How the worker recovers lost runs and fires schedules, and the port it serves metrics on. Defaults and meaning are in [RELIABILITY.md](RELIABILITY.md#settings). |
 
 

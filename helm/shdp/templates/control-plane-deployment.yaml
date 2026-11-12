@@ -9,13 +9,27 @@ spec:
       app: shdp-control-plane
   template:
     metadata:
+      # a change to the config or the secrets changes these, so Kubernetes replaces the pods. Without them a new value
+      # would sit in the ConfigMap while the pods kept running with the old one.
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         app: shdp-control-plane
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: control-plane
           image: "{{ .Values.image.controlPlane.repository }}:{{ .Values.image.controlPlane.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: {{ .Values.controlPlane.port }}
           envFrom:
@@ -25,12 +39,16 @@ spec:
                 name: shdp-secrets
           resources:
             {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          # ready = Postgres and Redis answer (/ready). A pod that is not ready gets no traffic but is not restarted
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: {{ .Values.controlPlane.port }}
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 5
+          # alive = the process answers (/health). It does not look at Postgres or Redis: a database outage must not
+          # restart every pod
           livenessProbe:
             httpGet:
               path: /health

@@ -23,7 +23,7 @@ running against it by default.
 secrets:
   databaseUrl: "postgresql+asyncpg://<user>:<pass>@<rds_endpoint>:5432/shdp"
   databaseUrlSync: "postgresql+psycopg2://<user>:<pass>@<rds_endpoint>:5432/shdp"
-  dataWarehouseUrl: "postgresql+asyncpg://<user>:<pass>@<rds_endpoint>:5432/data_warehouse"
+  dataWarehouseUrl: "postgresql://<user>:<pass>@<rds_endpoint>:5432/data_warehouse"
   redisUrl: "redis://<elasticache_endpoint>:6379/0"
   apiKeySecret: "<random-string>"
   adminSecretKey: "<random-string>"
@@ -40,9 +40,14 @@ kubectl run psql-client --rm -it --image=postgres:17 --restart=Never -- \
   -c "CREATE DATABASE data_warehouse;"
 ```
 
-Then run Alembic migrations against both databases before installing the chart
-(from a machine/pod that can reach RDS, or a one-off `kubectl run` job using
-the control-plane image).
+The schema is changed by the chart itself: a Helm hook Job (`templates/migrate-job.yaml`)
+runs `alembic upgrade head` with the control-plane image before every install and upgrade, and
+the release fails if it fails. Its log is kept when it fails
+(`kubectl logs job/shdp-migrate`) and the Job is removed when it succeeds. Set
+`migrations.enabled=false` only if you run migrations some other way.
+
+Use two different secrets of 16 or more characters for `apiKeySecret` and `adminSecretKey`. Set
+`env.ENV` to `production` to have the programs enforce that at startup.
 
 ## Install
 
@@ -52,6 +57,15 @@ helm install shdp . \
   --set image.controlPlane.repository=<terraform output ecr_control_plane_repo> \
   --set image.worker.repository=<terraform output ecr_worker_repo>
 ```
+
+## What the chart sets
+
+- Pods run as user 10001, never as root, with privilege escalation off and all capabilities dropped.
+- The control plane is ready when `/ready` answers (Postgres and Redis reachable) and alive when `/health`
+  answers. A database outage takes pods out of the Service without restarting them.
+- The worker gets `worker.terminationGracePeriodSeconds` (120) to finish the run in hand after SIGTERM.
+- `ALLOW_PRIVATE_URLS` is `false`: pipeline sources and webhooks cannot point at private addresses.
+  See [docs/PRODUCTION.md](../../docs/PRODUCTION.md).
 
 ## Verify
 

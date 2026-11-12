@@ -1,0 +1,61 @@
+{{- if .Values.migrations.enabled }}
+# The database schema is changed by a Job that runs before the pods of a new version are replaced (a Helm hook), and
+# the release fails if it fails. Without it, a new worker can start on a schema that does not have its columns yet.
+# The Secret is a hook too, because on a first install the chart's own Secret does not exist yet when this Job runs.
+# Both are removed when the Job succeeds, and kept when it fails, so the log can be read.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shdp-migrate-secrets
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+type: Opaque
+stringData:
+  DATABASE_URL: {{ required "secrets.databaseUrl is required (postgresql+asyncpg://...)" .Values.secrets.databaseUrl | quote }}
+  DATABASE_URL_SYNC: {{ required "secrets.databaseUrlSync is required" .Values.secrets.databaseUrlSync | quote }}
+  DATA_WAREHOUSE_URL: {{ required "secrets.dataWarehouseUrl is required" .Values.secrets.dataWarehouseUrl | quote }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shdp-migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: shdp-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.controlPlane.repository }}:{{ .Values.image.controlPlane.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - secretRef:
+                name: shdp-migrate-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+{{- end }}
