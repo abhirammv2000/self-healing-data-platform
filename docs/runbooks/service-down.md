@@ -25,4 +25,4 @@ SELECT id, pipeline_id, started_at FROM pipeline_runs
 WHERE status = 'running' AND lease_expires_at < now();
 ```
 
-That query should return nothing for more than a minute or so while a worker is up. If it keeps returning rows, no worker is running the reaper: see [RELIABILITY.md](../RELIABILITY.md).
+A worker that was only paused, not dead, and wakes up after another worker took its run, stops by itself (`run_lease_lost` in its log) and changes nothing. That query should return nothing for more than a minute or so while a worker is up. If it keeps returning rows, no worker is running the reaper: see [RELIABILITY.md](../RELIABILITY.md).

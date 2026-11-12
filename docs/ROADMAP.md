@@ -3,9 +3,8 @@
 What is already built is in the README. Next steps:
 
 
-- [ ] **Fencing tokens for runs**: a worker that is slow, not dead, can lose its lease and still write. Check the lease on every write to close this ([RELIABILITY.md](RELIABILITY.md#what-is-still-not-guaranteed)).
-- [ ] **Exactly one half-open trial**: today every run is let through while a breaker is half-open, and the first to finish decides.
-- [ ] **Skip a scheduled run while the last one is still going**, as an option per schedule.
+- [ ] **Fence the steps' outside effects**: the run's record is fenced, but a step already running when its worker loses the lease can still write a file or the warehouse table. Pass the token into the step ([RELIABILITY.md](RELIABILITY.md#what-is-still-not-guaranteed)).
+- [ ] **Skip a scheduled run while the last one is still going**, as an option per schedule, so a slow pipeline does not build a backlog.
 - [ ] **Recovery-planning prompt fix for schema drift vs. data quality**: the eval (see [EVALUATION.md](EVALUATION.md)) found the model reaches for `schema_evolution` on cases that are data-quality problems (nulls, corrupt files, a muddied failure trail), not safe-to-evolve schema drift. Needs an explicit distinction in the prompt, then a re-run of the eval to confirm it moved the number.
 - [ ] **Retrieval grounding weight in recovery planning**: the ablation found a past-incident chunk describing a directly relevant prior outage didn't change the recommendation. Worth more than 3 ablation cases before concluding this is systemic, but worth watching.
 - [ ] **`log_analysis_node` evaluation**: the current harness doesn't score it (open-ended prose has no crisp gold label); would need an LLM-as-judge rubric instead of exact-match scoring.

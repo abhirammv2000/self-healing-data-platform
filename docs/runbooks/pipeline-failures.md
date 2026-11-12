@@ -30,6 +30,17 @@ GROUP BY 1, 2 ORDER BY 3 DESC;
 
 The recommendations are for a person to apply. The agent never acts on them itself. Mostly `unknown` means the agent is guessing, and the failures need a human read.
 
+## A run stays `queued` although workers are up
+
+A pipeline runs one run at a time. If another run of the same pipeline is running, a new run is left `queued` (the worker logs `pipeline_run_deferred`, and `pipeline_runs_deferred_total` goes up) and starts the moment the one before it ends. Check what is holding the pipeline:
+
+```sql
+SELECT id, status, attempts, lease_expires_at FROM pipeline_runs
+WHERE pipeline_id = 2 AND status IN ('running', 'retrying');
+```
+
+If that run is alive, wait. If its worker is gone, its lease runs out within a minute and the reaper takes the run back. A waiting run is offered again at the latest `ENQUEUE_VISIBILITY_SECONDS` (30) after the last time it was offered.
+
 ## Circuit breakers
 
 A breaker opens after repeated failures on one pipeline and blocks its runs, which show up with status `blocked` and error type `CircuitBreakerOpen`. The worker logs `circuit_breaker_opened` with the pipeline id.
