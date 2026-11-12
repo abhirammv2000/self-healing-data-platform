@@ -18,9 +18,9 @@ async def test_a_run_created_while_redis_is_down_is_started_once_redis_is_back(w
     run_id = await world.run(pipeline)
 
     # Redis is down: the push fails, and the caller is told the run exists, not that it failed
-    monkeypatch.setattr(run_queue.redis_client, "rpush", AsyncMock(side_effect=ConnectionError("redis is down")))
-    assert await run_queue.enqueue_run(run_id) is False
-    monkeypatch.undo()
+    with monkeypatch.context() as down:  # only this patch is undone, the fetch stub of the fixtures stays
+        down.setattr(run_queue.redis_client, "rpush", AsyncMock(side_effect=ConnectionError("redis is down")))
+        assert await run_queue.enqueue_run(run_id) is False
     assert (await helpers.get_run(run_id)).last_enqueued_at is None
     assert await helpers.queue_contents() == []
 

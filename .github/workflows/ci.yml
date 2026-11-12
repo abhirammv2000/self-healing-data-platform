@@ -95,6 +95,36 @@ jobs:
       - name: Run all tests, including the integration tests
         run: pytest tests -v
 
+  images-and-chart:
+    name: Images and Helm chart
+    # Both images build, run as a non-root user, and the chart lints and renders with the migration hook, the probes and
+    # the security settings. Nothing is pushed anywhere.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the images
+        run: |
+          docker build -f Dockerfile.control_plane -t shdp-cp:ci .
+          docker build -f Dockerfile.worker -t shdp-worker:ci .
+
+      - name: The images run as a non-root user
+        run: |
+          test "$(docker run --rm shdp-cp:ci id -u)" = "10001"
+          test "$(docker run --rm shdp-worker:ci id -u)" = "10001"
+          docker run --rm shdp-worker:ci python -c "import os, sys; sys.exit(0 if os.access('/app/data', os.W_OK) else 1)"
+
+      - name: Lint and render the chart
+        run: |
+          ARGS="--set secrets.databaseUrl=postgresql+asyncpg://u:p@h/db --set secrets.databaseUrlSync=postgresql://u:p@h/db --set secrets.dataWarehouseUrl=postgresql://u:p@h/dw --set secrets.redisUrl=redis://r:6379/0 --set secrets.apiKeySecret=aaaaaaaaaaaaaaaaaaaa --set secrets.adminSecretKey=bbbbbbbbbbbbbbbbbbbb --set secrets.googleApiKey=k --set image.controlPlane.repository=cp --set image.worker.repository=wk"
+          helm lint helm/shdp $ARGS
+          helm template shdp helm/shdp $ARGS > rendered.yaml
+          grep -q "helm.sh/hook.: pre-install,pre-upgrade" rendered.yaml
+          grep -q "path: /ready" rendered.yaml
+          grep -q "runAsNonRoot: true" rendered.yaml
+          grep -q "terminationGracePeriodSeconds" rendered.yaml
+          grep -q "ALLOW_PRIVATE_URLS: .false." rendered.yaml
+
   alerting-rules:
     name: Alerting rules
     runs-on: ubuntu-latest

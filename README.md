@@ -21,7 +21,7 @@ This was a group project. Anirudh Kakati wrote most of the control plane, the wo
 ```
 
 - **Control plane:** a REST API for tenants, pipelines, steps, schedules and runs. It creates runs and puts their ids on a Redis queue.
-- **Worker:** takes runs off the queue, runs the steps with retries, and checks the circuit breaker. It writes a record of every run and sends a webhook when the run ends. Every worker also runs a reaper that recovers lost runs, and a scheduler that starts runs on cron schedules ([docs/RELIABILITY.md](docs/RELIABILITY.md)).
+- **Worker:** takes runs off the queue, runs the steps with retries, and checks the circuit breaker. On SIGTERM it finishes the run it has and exits. It writes a record of every run and sends a webhook when the run ends. Every worker also runs a reaper that recovers lost runs, and a scheduler that starts runs on cron schedules ([docs/RELIABILITY.md](docs/RELIABILITY.md)).
 - **Diagnostic agent:** when a run fails, a LangGraph graph reads the failure, classifies it, finds related runbook sections and past incidents in pgvector, and writes a recommended action.
 - **Tenancy and auth:** every query is scoped to a tenant. An admin secret creates tenants, and each tenant gets hashed API keys.
 
@@ -29,8 +29,9 @@ More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What has been tested
 
-- **157 unit tests**, run in CI on every push with a `ruff` lint check. They need no database, Redis or API key.
-- **47 integration tests** on a real Postgres and Redis, also run in CI. They kill a worker process mid-run, take Redis away, run 40 runs on 6 workers, and check that a run is never lost or run twice, a worker that lost its lease cannot overwrite the one that took over, a pipeline runs one run at a time, a circuit breaker recovers and a schedule fires once. Before and after results, throughput with 1 to 8 workers, and what is still not guaranteed are in [docs/RELIABILITY.md](docs/RELIABILITY.md).
+- **275 unit tests**, run in CI on every push with a `ruff` lint check. They need no database, Redis or API key.
+- **60 integration tests** on a real Postgres and Redis, also run in CI, 12 of them end to end (the real API and worker as separate programs, driven over HTTP). They kill a worker process mid-run, stop one with SIGTERM and check it finishes its run, take Redis away, run 40 runs on 6 workers, and check that a run is never lost or run twice, a worker that lost its lease cannot overwrite the one that took over, a pipeline runs one run at a time, a circuit breaker recovers and a schedule fires once. Before and after results, throughput with 1 to 8 workers, and what is still not guaranteed are in [docs/RELIABILITY.md](docs/RELIABILITY.md).
+- **Production hardening**, checked on a local Kubernetes cluster: startup checks on the configuration, `/ready` and `/health`, a worker that finishes its run on SIGTERM, a time limit on the model, a block on pipeline sources and webhooks that point at private addresses, non-root images, and a migration Job in the chart. What was wrong, how each was checked and what is still missing are in [docs/PRODUCTION.md](docs/PRODUCTION.md).
 - **A 33-case evaluation** of the agent, using hand-labeled failures and live Gemini calls: 90.9% classification accuracy and 84.8% recommended-action accuracy. The inputs to the later graph steps are hand-written stand-ins, and one weak spot is documented. See [docs/EVALUATION.md](docs/EVALUATION.md).
 - **3 SLOs** with burn-rate alerts, Alertmanager, a Grafana dashboard and a runbook for each alert. The alert rules have unit tests that run in CI. The thresholds have not been tuned on real traffic. See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) and [docs/SLOs.md](docs/SLOs.md).
 - **A real AWS EKS deployment:** Terraform builds the VPC, EKS, RDS, ElastiCache and ECR. Helm installs the control plane and worker. I ran a pipeline through it, then tore everything down and checked the AWS console for leftovers. Nothing runs by default. The steps to bring it back are in [helm/shdp/README.md](helm/shdp/README.md).

@@ -1,11 +1,12 @@
-import httpx
 from urllib.parse import urlparse
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 from worker.app.exceptions import IngestionStepError, ValidationStepError, TransformationStepError, LoadStepError
 import operator
+from shared import config
 from shared.db import dw_engine
+from shared.url_guard import check_url_syntax, guarded_client
 from shared.observability import get_logger
 
 log=get_logger(__name__)
@@ -181,11 +182,25 @@ async def run_load(config, run_context):
 
 #helper functions and mappings
 async def fetch_data(url: str):
-    async with httpx.AsyncClient() as client:
-        response=await client.get(url)
-        response.raise_for_status()
+    """Download `url` and return the bytes. Refuses a private address (shared/url_guard.py) and a file bigger than
+    MAX_DOWNLOAD_MB, which is checked while it is being read, so a huge or endless answer never fills the memory."""
+    check_url_syntax(url)
+    limit=config.MAX_DOWNLOAD_MB*1024*1024
+    async with guarded_client() as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            declared=response.headers.get("content-length")
+            if declared is not None and declared.isdigit() and int(declared)>limit:
+                raise ValueError(f"the file is larger than {config.MAX_DOWNLOAD_MB} MB")
+            chunks=[]
+            size=0
+            async for chunk in response.aiter_bytes():
+                size+=len(chunk)
+                if size>limit:
+                    raise ValueError(f"the file is larger than {config.MAX_DOWNLOAD_MB} MB")
+                chunks.append(chunk)
 
-        return response.content #returns bytes
+    return b"".join(chunks) #returns bytes
 
 step_registry={"ingestion":run_ingestion,
                "validation":run_validation,

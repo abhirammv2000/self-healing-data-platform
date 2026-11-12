@@ -23,6 +23,7 @@ controlPlane:
 
 worker:
   replicaCount: 1
+  terminationGracePeriodSeconds: 120
   resources:
     requests:
       cpu: 100m
@@ -31,10 +32,16 @@ worker:
       cpu: 500m
       memory: 512Mi
 
+# Run `alembic upgrade head` as a Job before every install and upgrade, so the schema matches the new code before the
+# new pods start. See helm/shdp/README.md. Turn off only if migrations are run some other way.
+migrations:
+  enabled: true
+
 # Non-secret config, matching shared/config.py's env var names. DB/Redis hosts and secrets
 # come from a separate, gitignored secrets values file at deploy time.
 env:
   ENV: "aws-portfolio-test"
   GEMINI_MODEL: "gemini-3.6-flash"
   GEMINI_EMBEDDING_MODEL: "gemini-embedding-001"
+  ALLOW_PRIVATE_URLS: "false" # a pipeline source or webhook may not point at a private address, see docs/PRODUCTION.md
   OTEL_TRACES_ENABLED: "false" # no Jaeger deployed to this cluster, see helm/shdp/README.md

@@ -14,6 +14,7 @@ The order of events:
      None of those can change the outcome of the run.
 """
 import asyncio
+from asyncio import wait_for  # by name: the unit tests replace the asyncio module attribute used for sleeping
 import json
 import random
 from datetime import timedelta
@@ -27,7 +28,7 @@ from control_plane.app.models.pipeline_runs import PipelineRun
 from control_plane.app.models.pipeline_steps import PipelineStep
 from control_plane.app.models.pipelines import Pipeline
 from shared import metrics
-from shared.config import RUN_LEASE_SECONDS
+from shared.config import DIAGNOSTIC_TIMEOUT_SECONDS, RUN_LEASE_SECONDS
 from shared.db import async_session
 from shared.observability import get_logger, get_tracer
 from shared.utils import now_naive
@@ -511,7 +512,11 @@ async def _finish_run(session, run_id, pipeline_run, run_context):
         # imported here so a broken agent dependency cannot stop the worker from starting
         from worker.app.agent.diagnostic_agent import run_diagnostic_agent
 
-        recommendation_id = await run_diagnostic_agent(run_context)
+        # the model is a remote service: if it hangs, the run goes on without a recommendation instead of holding the
+        # worker, and the webhook, for ever
+        recommendation_id = await wait_for(run_diagnostic_agent(run_context), timeout=DIAGNOSTIC_TIMEOUT_SECONDS)
+    except TimeoutError:  # asyncio.TimeoutError is this one from Python 3.11
+        log.error("diagnostic_agent_timed_out", run_id=run_id, timeout_seconds=DIAGNOSTIC_TIMEOUT_SECONDS)
     except Exception as error:
         log.error("diagnostic_agent_failed", run_id=run_id, error=str(error))
 
