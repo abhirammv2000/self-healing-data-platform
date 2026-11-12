@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12 or newer (the Docker images use 3.12 and CI runs 3.13)
 - Docker & Docker Compose (for Postgres + Redis)
 - A Google AI (Gemini) API key
 
@@ -54,6 +54,7 @@ All configuration is read from environment variables (loaded from `.env` via `py
 | `GEMINI_MODEL` | Chat model for the agent (default `gemini-3.6-flash`, switched from `gemini-2.5-flash` on 2026-09-19 after that model started 404ing for this account; see [EVALUATION.md](EVALUATION.md)). |
 | `GEMINI_EMBEDDING_MODEL` | Embedding model for RAG (default `gemini-embedding-001`). |
 | `ENV` | Environment label (default `dev`). |
+| `RUN_LEASE_SECONDS`, `REAPER_INTERVAL_SECONDS`, `ENQUEUE_VISIBILITY_SECONDS`, `RUN_MAX_ATTEMPTS`, `SCHEDULER_INTERVAL_SECONDS`, `WORKER_METRICS_PORT` | Optional. How the worker recovers lost runs and fires schedules, and the port it serves metrics on. Defaults and meaning are in [RELIABILITY.md](RELIABILITY.md#settings). |
 
 
 ## Database migrations

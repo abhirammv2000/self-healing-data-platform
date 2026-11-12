@@ -1,4 +1,4 @@
-"""Break worker/app/executor.py in 15 specific ways and check that the executor tests notice each one.
+"""Break worker/app/executor.py in 17 specific ways and check that the executor tests notice each one.
 
 A test suite that passes proves little if it would also pass with a bug in the code. This breaks the executor on
 purpose (a backoff delay off by one, a breaker that opens a failure too late, a run marked with the wrong status,
@@ -36,6 +36,10 @@ MUTATIONS = [
     ("open breaker no longer blocks",
      'if circuit_breaker and circuit_breaker.state == "open":',
      'if circuit_breaker and circuit_breaker.state == "never":'),
+    ("open breaker never recovers by itself",
+     "if not await _half_open_if_due(session, circuit_breaker):", "if True:"),
+    ("a run that lost the race to make the breaker half-open is blocked",
+     'return circuit_breaker.state != "open"', "return result.rowcount == 1"),
     ("failure error is swallowed",
      "raise  # the original error goes to the caller", "pass"),
     ("retry count is not recorded",
@@ -44,11 +48,11 @@ MUTATIONS = [
      'except Exception as error:\n        log.error("diagnostic_agent_failed"',
      'except KeyboardInterrupt as error:\n        log.error("diagnostic_agent_failed"'),
     ("claim sets the wrong status",
-     '.values(status="running", started_at=now, updated_at=now)',
-     '.values(status="success", started_at=now, updated_at=now)'),
+     '.values(\n            status="running",',
+     '.values(\n            status="success",'),
     ("claim ignores the queued check",
-     '.where(PipelineRun.id == run_id, PipelineRun.status == "queued")\n        .values(status="running"',
-     '.where(PipelineRun.id == run_id)\n        .values(status="running"'),
+     '.where(PipelineRun.id == run_id, PipelineRun.status == "queued")\n        .values(\n            status="running",',
+     '.where(PipelineRun.id == run_id)\n        .values(\n            status="running",'),
     ("failed run not marked failed",
      'pipeline_run.status = "failed"', 'pipeline_run.status = "success"'),
     ("success not marked",

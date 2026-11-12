@@ -34,7 +34,7 @@ The recommendations are for a person to apply. The agent never acts on them itse
 
 A breaker opens after repeated failures on one pipeline and blocks its runs, which show up with status `blocked` and error type `CircuitBreakerOpen`. The worker logs `circuit_breaker_opened` with the pipeline id.
 
-A breaker does not reset itself. Nothing in the worker moves it out of `open`, so a person has to do it once the cause is fixed. Set it to `half-open` through the control plane, which lets the next run through as a trial:
+A breaker recovers by itself. When its `retry_after` time has passed, the next run to arrive turns it `half-open` (the worker logs `circuit_breaker_half_open`) and goes ahead as the trial. A breaker that was opened by hand, with no `retry_after`, stays open until a person changes it. To skip the wait once the cause is fixed, set it to `half-open` through the control plane, which lets the next run through as a trial:
 
 ```bash
 curl -X PUT http://localhost:8000/tenants/1/pipelines/2/circuit_breakers/ \
@@ -42,7 +42,7 @@ curl -X PUT http://localhost:8000/tenants/1/pipelines/2/circuit_breakers/ \
   -d '{"state": "half-open"}'
 ```
 
-If that run succeeds the worker closes the breaker (`circuit_breaker_closed`). If it fails the breaker opens again straight away. If several breakers opened at once, fix the shared cause first, then reset each one.
+If that run succeeds the worker closes the breaker (`circuit_breaker_closed`). If it fails the breaker opens again straight away, for another full wait. While a breaker is half-open every run is let through, not only the first, and the first to finish decides. If several breakers opened at once, fix the shared cause first, then reset each one.
 
 ## When it is the platform
 

@@ -5,7 +5,7 @@ from control_plane.app.services.pipeline_runs import get_pipeline_run_service, g
 from control_plane.app.schemas.pipeline_runs import PipelineRunResponse, PipelineRunStatusResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from typing import List
-from shared.redis_client import redis_client
+from shared.run_queue import enqueue_run
 
 pipeline_runs_router=APIRouter()
 tenant_runs_router=APIRouter()
@@ -81,10 +81,9 @@ async def create_pipeline_run(tenant_id: int, pipeline_id: int, response: Respon
         response.status_code=status.HTTP_200_OK
         return pipeline_run
 
-    #push to redis, only for a new run
-    try:
-        await redis_client.rpush("pipeline_runs", str(pipeline_run.id))
-    except Exception: #generic exception for now
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="Pipeline run was created, but failed to enqueue for execution.")
+    #put it on the queue, only for a new run. If Redis is down this is not an error: the run is already saved,
+    #and the reaper in the worker puts it on the queue as soon as it can, see worker/app/reaper.py. Answering 500
+    #here used to make callers retry, and a retry without an Idempotency-Key made a second run.
+    await enqueue_run(pipeline_run.id)
 
     return pipeline_run

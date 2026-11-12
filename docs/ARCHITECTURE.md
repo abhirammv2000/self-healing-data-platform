@@ -22,7 +22,7 @@ A clean separation underpins the whole design: **the control plane owns creation
 - **Event-driven execution**: the worker blocks on a Redis list (`BLPOP`) and processes runs as they arrive, decoupling enqueue from execute.
 - **Configurable step pipeline**: pipelines are ordered sequences of steps. Built-in step handlers: `ingestion` (HTTP fetch via `httpx`), `validation` (schema/null/row-count checks via `pandas`), `transformation` (rename / filter / drop), and `load` (writes to a separate data-warehouse Postgres DB). Steps share a `run_context` dict so later steps can read earlier outputs.
 - **Automatic retries**: per-step retry config supports `exponential_backoff` and `exponential_backoff_jitter` strategies.
-- **Circuit breakers**: per-pipeline breakers (configurable failure threshold + rolling window) open to block runs after repeated failures, with `closed -> open -> half-open` state transitions. State lives in Postgres (source of truth).
+- **Circuit breakers**: per-pipeline breakers (configurable failure threshold + rolling window) open to block runs after repeated failures, with `closed -> open -> half-open -> closed` state transitions: when an open breaker's wait is over, the next run turns it half-open and runs as the trial. State lives in Postgres (source of truth).
 - **Always-on observability**: every run writes a `run_context.json` capturing step attempts, timing, and outcomes, recorded in a `finally` block so it's captured regardless of how the run ends.
 - **Webhook callbacks**: fire-and-forget delivery (via `asyncio.create_task`) on run completion/failure, with full delivery audit records. Failed-run payloads include a `recommendations_url` pointing at the agent's diagnosis.
 - **Multi-agent failure diagnosis**: a LangGraph graph of specialized nodes (log analysis -> classification -> retrieval -> recovery planning) produces a structured, grounded recommendation for every failed run.
@@ -70,7 +70,7 @@ A couple of intentional schema decisions worth calling out:
 1. **Enqueue**: the control plane creates a `pipeline_run` (`status="queued"`) and pushes its `run_id` onto the Redis `pipeline_runs` queue.
 2. **Pick up**: the worker's `BLPOP` loop receives the `run_id`.
 3. **Circuit-breaker gate**: if the pipeline's breaker is `open`, the run is marked `blocked` and execution stops.
-4. **Atomic claim**: the run is flipped `queued -> running` in a single conditional `UPDATE`, so two workers can never both claim the same run.
+4. **Atomic claim**: the run is flipped `queued -> running` in a single conditional `UPDATE`, so two workers can never both claim the same run. The claim also counts the attempt and sets a lease that the worker keeps extending; a reaper in every worker takes back runs whose lease ran out and re-queues runs that never reached the queue, and a scheduler in every worker starts runs when a cron time comes. See [RELIABILITY.md](RELIABILITY.md).
 5. **Execute steps**: steps run in `step_order`. Each step retries per its config (exponential backoff, optionally with jitter). Every attempt is recorded in `run_context["step_attempts"]`.
 6. **Resolve outcome**:
    - **Success:** run marked `success`.
