@@ -34,6 +34,9 @@ class FakeResult:
     def scalar_one(self):
         return self.value
 
+    def one_or_none(self):
+        return self.value
+
     def scalars(self):
         return SimpleNamespace(all=lambda: self.items)
 
@@ -44,7 +47,7 @@ class FakeDatabase:
     def __init__(self, steps, breaker, run_status, callback_url, failed_runs):
         self.run = SimpleNamespace(
             id=1, pipeline_id=7, tenant_id=3, status=run_status, started_at=None, updated_at=None,
-            ended_at=None, error_type=None, error_message=None, retry_count=0,
+            ended_at=None, error_type=None, error_message=None, retry_count=0, attempts=0,
         )
         self.steps = steps
         self.breaker = breaker
@@ -60,6 +63,9 @@ class FakeDatabase:
             return self._update_run(statement)
         if sql.startswith("UPDATE pipeline_circuit_breakers"):
             return self._update_breaker(statement)
+        if "FOR UPDATE" in sql:
+            # the check that the worker still owns the run, which reads its attempt number and status
+            return FakeResult(self.run)
         if "count(" in sql:
             return FakeResult(self.failed_runs)
         if "FROM pipeline_circuit_breakers" in sql:
@@ -81,6 +87,9 @@ class FakeDatabase:
         for column, value in params.items():
             if not column.endswith("_1") and column != "id":
                 setattr(self.run, column, value)
+        if params.get("status") == "running":  # a claim: counts the attempt and returns its number
+            self.run.attempts += 1
+            return FakeResult(value=self.run.attempts, rowcount=1)
         return FakeResult(rowcount=1)
 
     def _update_breaker(self, statement):
@@ -124,6 +133,8 @@ class FakeSessionFactory:
 
 class FakeLeaseKeeper:
     """Stands in for the heartbeat, which has its own tests in test_lease.py."""
+
+    lost = False
 
     async def stop(self):
         pass
@@ -180,7 +191,7 @@ def harness(monkeypatch):
         monkeypatch.setattr(executor, "async_session", FakeSessionFactory(database))
         monkeypatch.setattr(executor, "now_naive", lambda: NOW)
         monkeypatch.setattr(executor, "asyncio", SimpleNamespace(sleep=fake_sleep, create_task=lambda coro: coro))
-        monkeypatch.setattr(executor, "start_lease_keeper", lambda run_id: FakeLeaseKeeper())
+        monkeypatch.setattr(executor, "start_lease_keeper", lambda run_id, attempt: FakeLeaseKeeper())
         monkeypatch.setattr(executor, "run_observability_recording", fake_record)
         monkeypatch.setattr(executor, "dispatch_webhook_callback", fake_webhook)
 
@@ -490,6 +501,108 @@ async def test_when_another_worker_made_it_half_open_first_this_run_goes_ahead_t
     await h.run()
 
     assert h.database.run.status == "success" and h.calls == ["ok"]
+
+
+# ---- a worker that lost its lease must not write ----
+
+
+def take_over(h, monkeypatch, then_fail=False, name="taken_over"):
+    """A step that plays another worker claiming the run in the middle of this worker's step."""
+
+    async def step_fn(config, context):
+        h.calls.append(name)
+        h.database.run.attempts += 1
+        if then_fail:
+            raise RuntimeError("late failure")
+
+    monkeypatch.setitem(executor.step_registry, name, step_fn)
+
+
+async def test_a_worker_whose_run_was_taken_over_does_not_mark_it_a_success(harness, monkeypatch):
+    h = harness([step(1, "ok")])
+    take_over(h, monkeypatch)
+    h.database.steps = [step(1, "taken_over")]
+
+    result = await h.run()  # no error: the worker just stops
+
+    assert result is h.database.run
+    assert h.database.run.status == "running"  # still the other worker's to finish
+    assert h.database.run.ended_at is None
+    assert h.recorded == [] and h.webhooks == []
+    h.agent.assert_not_awaited()
+
+
+async def test_a_worker_whose_run_was_taken_over_does_not_fail_it_or_trip_the_breaker(harness, monkeypatch):
+    closed = breaker("closed", threshold=1)
+    h = harness([step(1, "ok")], closed, failed_runs=99)  # one more failure would open the breaker
+    take_over(h, monkeypatch, then_fail=True)
+    h.database.steps = [step(1, "taken_over")]
+
+    await h.run()  # the late failure is not raised either
+
+    assert h.database.run.status == "running" and h.database.run.error_type is None
+    assert closed.state == "closed"
+    assert h.recorded == [] and h.webhooks == []
+    h.agent.assert_not_awaited()
+
+
+async def test_a_worker_whose_run_was_taken_over_stops_instead_of_retrying(harness, monkeypatch):
+    h = harness([step(1, "ok")])
+    take_over(h, monkeypatch, then_fail=True)
+    h.database.steps = [step(1, "taken_over", retry={"max_retries": 3, "base_delay": 0})]
+
+    await h.run()
+
+    assert h.calls == ["taken_over"]  # the step was not run a second time
+    assert h.database.run.status == "running"  # and not marked retrying
+    assert h.database.run.retry_count == 0
+
+
+async def test_a_run_the_reaper_put_back_in_the_queue_cannot_be_finished_by_the_old_worker(harness, monkeypatch):
+    h = harness([step(1, "ok")])
+
+    async def reaped(config, context):
+        h.database.run.status = "queued"  # the lease ran out and the reaper took the run back
+
+    monkeypatch.setitem(executor.step_registry, "reaped", reaped)
+    h.database.steps = [step(1, "reaped")]
+
+    await h.run()
+
+    assert h.database.run.status == "queued"
+    assert h.recorded == []
+
+
+async def test_a_worker_that_learns_its_lease_is_lost_stops_before_the_next_step(harness, monkeypatch):
+    h = harness([step(1, "ok")])
+    keeper = FakeLeaseKeeper()
+    monkeypatch.setattr(executor, "start_lease_keeper", lambda run_id, attempt: keeper)
+
+    async def lose(config, context):
+        h.calls.append("lose")
+        keeper.lost = True  # the heartbeat found out
+
+    monkeypatch.setitem(executor.step_registry, "lose", lose)
+    h.database.steps = [step(1, "lose"), step(2, "ok")]
+
+    await h.run()
+
+    assert h.calls == ["lose"]  # the second step never ran
+    assert h.database.run.status == "running"
+    assert h.recorded == [] and h.webhooks == []
+
+
+async def test_the_heartbeat_gets_the_attempt_number_of_the_claim_and_the_writes_use_it(harness, monkeypatch):
+    h = harness([step(1, "ok")])
+    h.database.run.attempts = 4  # claimed three times before
+    started = []
+    monkeypatch.setattr(executor, "start_lease_keeper", lambda run_id, attempt: started.append((run_id, attempt)) or FakeLeaseKeeper())
+
+    await h.run()
+
+    assert started == [(1, 5)]
+    assert h.database.run.status == "success" and h.database.run.attempts == 5
+    assert h.recorded[0]["attempt"] == 5
 
 
 # ---- a run that cannot be claimed ----

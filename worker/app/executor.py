@@ -32,7 +32,7 @@ from shared.db import async_session
 from shared.observability import get_logger, get_tracer
 from shared.utils import now_naive
 from shared.webhook_dispatcher import dispatch_webhook_callback
-from worker.app.exceptions import InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
+from worker.app.exceptions import LeaseLostError, InvalidPipelineRunStatusError, ObservabilityRecordingError, UnknownStepTypeError
 from worker.app.lease import start_lease_keeper
 from worker.app.step_handlers import step_registry
 
@@ -61,12 +61,12 @@ async def _run_executor_service(run_id: int):
                     # nothing below this point runs for a blocked run: no steps, no agent, no webhook
                     return await _block_run(session, run_id, pipeline_id)
 
-            claimed_rows = await _claim_run(session, run_id)
+            attempt = await _claim_run(session, run_id)
         except SQLAlchemyError:
             await session.rollback()
             raise
 
-        if claimed_rows == 0:
+        if attempt is None:
             await _raise_run_not_claimable(session, run_id)
 
         # re-fetch the run now that it is marked running
@@ -74,7 +74,10 @@ async def _run_executor_service(run_id: int):
         if not pipeline_run:
             raise ValueError(f"Pipeline run {run_id} not found")
 
-        lease_keeper = start_lease_keeper(run_id)
+        # `attempt` is this worker's claim number, and the fencing token: every write to the run below checks that the
+        # run is still on this attempt, so a worker that lost its lease cannot overwrite the worker that took over
+        lease_keeper = start_lease_keeper(run_id, attempt)
+        lease_lost = False
         try:
             # this dictionary is passed from step to step: earlier steps write values, later steps read them
             run_context = {
@@ -82,24 +85,40 @@ async def _run_executor_service(run_id: int):
                 "pipeline_id": pipeline_run.pipeline_id,
                 "tenant_id": pipeline_run.tenant_id,
                 "retry_count": 0,
+                "attempt": attempt,
             }
 
             for step in await _fetch_steps(session, pipeline_run.pipeline_id):
-                await _run_step_with_retries(session, pipeline_run, step, run_context)
+                if lease_keeper.lost:
+                    raise LeaseLostError(f"run {run_id} was taken over by another worker")
+                await _run_step_with_retries(session, pipeline_run, step, run_context, attempt)
 
-            await _mark_run_succeeded(session, run_id, pipeline_id, pipeline_run, run_context)
+            await _mark_run_succeeded(session, run_id, pipeline_id, pipeline_run, run_context, attempt)
             await _close_half_open_circuit_breaker(session, pipeline_id)
+            return pipeline_run
+
+        except LeaseLostError as error:
+            # another worker owns the run now and will report how it ended. This one writes nothing more:
+            # no failure, no breaker change, no agent, no webhook
+            lease_lost = True
+            log.warning("run_lease_lost", run_id=run_id, attempt=attempt, detail=str(error))
             return pipeline_run
 
         except Exception as error:
             # the run has to be fetched again after the rollback: an expired object cannot reload itself in async code
-            pipeline_run = await _record_failure(session, run_id, pipeline_id, pipeline_run, run_context, error)
+            try:
+                pipeline_run = await _record_failure(session, run_id, pipeline_id, pipeline_run, run_context, error, attempt)
+            except LeaseLostError as lost_error:
+                lease_lost = True
+                log.warning("run_lease_lost", run_id=run_id, attempt=attempt, detail=str(lost_error))
+                return pipeline_run
             await _update_circuit_breaker_after_failure(session, pipeline_id, error)
             raise  # the original error goes to the caller
 
         finally:
             await lease_keeper.stop()
-            await _finish_run(session, run_id, pipeline_run, run_context)
+            if not lease_lost:
+                await _finish_run(session, run_id, pipeline_run, run_context)
 
 
 # ---- getting ready to run ----
@@ -180,7 +199,8 @@ async def _block_run(session, run_id, pipeline_id):
 
 
 async def _claim_run(session, run_id):
-    """Change the run from queued to running in one statement and return how many rows that changed.
+    """Change the run from queued to running in one statement. Returns the new attempt number, or None when the run
+    was not queued (someone else has it, or it is finished). The attempt number is the fencing token of this claim.
 
     This is one UPDATE and not a SELECT followed by an UPDATE. With a SELECT first, two workers could both see
     'queued' and both run it.
@@ -196,9 +216,10 @@ async def _claim_run(session, run_id):
             attempts=PipelineRun.attempts + 1,
             lease_expires_at=func.now() + timedelta(seconds=RUN_LEASE_SECONDS),
         )
+        .returning(PipelineRun.attempts)
     )
     await session.commit()
-    return result.rowcount
+    return result.scalar_one_or_none()
 
 
 async def _raise_run_not_claimable(session, run_id):
@@ -212,7 +233,7 @@ async def _raise_run_not_claimable(session, run_id):
 # ---- running the steps ----
 
 
-async def _run_step_with_retries(session, pipeline_run, step, run_context):
+async def _run_step_with_retries(session, pipeline_run, step, run_context, claim_attempt):
     run_id = run_context["run_id"]
     step_type = step.step_type
     config = step.config or {}
@@ -256,7 +277,7 @@ async def _run_step_with_retries(session, pipeline_run, step, run_context):
                     raise  # no retries left: the run fails
 
                 run_context["retry_count"] = run_context.get("retry_count", 0) + 1
-                await _save_retry(session, pipeline_run, run_id)
+                await _save_retry(session, pipeline_run, run_id, claim_attempt)
                 await asyncio.sleep(delay)
 
 
@@ -273,14 +294,18 @@ def _record_attempt(run_context, step, attempt, status, error, delay):
     )
 
 
-async def _save_retry(session, pipeline_run, run_id):
-    """Count the retry on the run and mark it as retrying. A failure here is logged and does not stop the retry."""
+async def _save_retry(session, pipeline_run, run_id, attempt):
+    """Count the retry on the run and mark it as retrying. A failure here is logged and does not stop the retry,
+    except that a run taken over by another worker stops this one."""
     try:
+        await _fence(session, run_id, attempt)
         pipeline_run.retry_count += 1
         pipeline_run.updated_at = now_naive()
         pipeline_run.status = "retrying"
         await session.commit()
         await session.refresh(pipeline_run)
+    except LeaseLostError:
+        raise
     except Exception as error:
         await session.rollback()
         log.error("retry_count_update_failed", run_id=run_id, error=str(error))
@@ -289,7 +314,8 @@ async def _save_retry(session, pipeline_run, run_id):
 # ---- how a run ends ----
 
 
-async def _mark_run_succeeded(session, run_id, pipeline_id, pipeline_run, run_context):
+async def _mark_run_succeeded(session, run_id, pipeline_id, pipeline_run, run_context, attempt):
+    await _fence(session, run_id, attempt)
     now = now_naive()
     pipeline_run.status = "success"
     pipeline_run.ended_at = now
@@ -323,15 +349,19 @@ async def _close_half_open_circuit_breaker(session, pipeline_id):
         log.error("circuit_breaker_update_failed", pipeline_id=pipeline_id, error=str(error))
 
 
-async def _record_failure(session, run_id, pipeline_id, pipeline_run, run_context, error):
-    """Mark the run as failed and return the run to use from here on."""
+async def _record_failure(session, run_id, pipeline_id, pipeline_run, run_context, error, attempt):
+    """Mark the run as failed and return the run to use from here on. Raises LeaseLostError, and writes nothing,
+    when another worker has taken the run over."""
     await session.rollback()
     run_context["run_status"] = "failed"
     run_context["error_type"] = type(error).__name__
     run_context["error_message"] = str(error)
-    metrics.pipeline_runs_total.labels(status="failed").inc()
 
+    counted = False
     try:
+        await _fence(session, run_id, attempt)
+        metrics.pipeline_runs_total.labels(status="failed").inc()
+        counted = True
         pipeline_run = await _fetch_run(session, run_id)
         if pipeline_run:
             now = now_naive()
@@ -351,12 +381,35 @@ async def _record_failure(session, run_id, pipeline_id, pipeline_run, run_contex
                 error_type=type(error).__name__,
                 error_message=str(error),
             )
+    except LeaseLostError:
+        raise
     except Exception as save_error:
         # log it and carry on, so the original error is not hidden
+        if not counted:
+            metrics.pipeline_runs_total.labels(status="failed").inc()
         await session.rollback()
         log.error("run_status_update_failed", run_id=run_id, error=str(save_error))
 
     return pipeline_run
+
+
+async def _fence(session, run_id, attempt):
+    """Check that this worker still owns the run, and keep the row locked until the caller's next commit.
+
+    The run is owned by whichever worker made its latest claim, and that claim's number is `attempt`. If the lease
+    ran out and the reaper gave the run to another worker, the row now has a higher attempt number (or is not running
+    any more), and this worker must not write to it. Locking the row makes the check and the write one step: the
+    reaper cannot hand the run over in between. Raises LeaseLostError, after releasing the lock, when it is not ours.
+    """
+    row = (
+        await session.execute(
+            select(PipelineRun.attempts, PipelineRun.status).where(PipelineRun.id == run_id).with_for_update()
+        )
+    ).one_or_none()
+    if row is None or row.attempts != attempt or row.status not in ("running", "retrying"):
+        await session.rollback()
+        found = "gone" if row is None else f"attempt {row.attempts}, {row.status}"
+        raise LeaseLostError(f"run {run_id} is no longer attempt {attempt} of this worker ({found})")
 
 
 async def _update_circuit_breaker_after_failure(session, pipeline_id, error):

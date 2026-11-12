@@ -25,3 +25,7 @@ class LoadStepError(Exception):
 class ObservabilityRecordingError(Exception):
     """Raised when the observability recording step fails"""
     pass
+
+class LeaseLostError(Exception):
+    """Raised when this worker no longer owns the run: its lease ran out and another worker took the run over"""
+    pass

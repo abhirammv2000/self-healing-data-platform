@@ -97,7 +97,7 @@ async def test_the_heartbeat_extends_the_lease_while_the_run_works_and_stops_whe
     await helpers.set_run(run_id, status="running", attempts=1, lease_expires_at="sql:now() + interval '2 seconds'")
     before = (await helpers.get_run(run_id)).lease_expires_at
 
-    keeper = LeaseKeeper(run_id, lease_seconds=30, beat_seconds=0.2).start()
+    keeper = LeaseKeeper(run_id, attempt=1, lease_seconds=30, beat_seconds=0.2).start()
     await asyncio.sleep(0.8)
     extended = (await helpers.get_run(run_id)).lease_expires_at
     assert (extended - before).total_seconds() > 20

@@ -1,4 +1,4 @@
-"""Break worker/app/executor.py in 17 specific ways and check that the executor tests notice each one.
+"""Break worker/app/executor.py in 24 specific ways and check that the executor tests notice each one.
 
 A test suite that passes proves little if it would also pass with a bug in the code. This breaks the executor on
 purpose (a backoff delay off by one, a breaker that opens a failure too late, a run marked with the wrong status,
@@ -40,6 +40,24 @@ MUTATIONS = [
      "if not await _half_open_if_due(session, circuit_breaker):", "if True:"),
     ("a run that lost the race to make the breaker half-open is blocked",
      'return circuit_breaker.state != "open"', "return result.rowcount == 1"),
+    ("fence never refuses a worker that lost the run",
+     'if row is None or row.attempts != attempt or row.status not in ("running", "retrying"):', "if False:"),
+    ("fence ignores the attempt number",
+     "row.attempts != attempt or ", ""),
+    ("fence ignores a run that is no longer running",
+     ' or row.status not in ("running", "retrying")', ""),
+    ("success is written without the fence",
+     "run_context, attempt):\n    await _fence(session, run_id, attempt)\n    now = now_naive()",
+     "run_context, attempt):\n    now = now_naive()"),
+    ("failure is written without the fence",
+     "    try:\n        await _fence(session, run_id, attempt)\n        metrics.pipeline_runs_total",
+     "    try:\n        metrics.pipeline_runs_total"),
+    ("a retry is written without the fence",
+     "    try:\n        await _fence(session, run_id, attempt)\n        pipeline_run.retry_count += 1",
+     "    try:\n        pipeline_run.retry_count += 1"),
+    ("a worker that lost the run goes on to the next step",
+     "                if lease_keeper.lost:\n                    raise LeaseLostError(f\"run {run_id} was taken over by another worker\")\n",
+     ""),
     ("failure error is swallowed",
      "raise  # the original error goes to the caller", "pass"),
     ("retry count is not recorded",
