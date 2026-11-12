@@ -48,3 +48,53 @@ RUN_MAX_ATTEMPTS = _positive_int("RUN_MAX_ATTEMPTS", 3)
 WORKER_METRICS_PORT = _positive_int("WORKER_METRICS_PORT", 8001)
 # how often a worker checks whether a schedule is due. A run starts at most this long after its cron time
 SCHEDULER_INTERVAL_SECONDS = _positive_int("SCHEDULER_INTERVAL_SECONDS", 10)
+
+# the longest the diagnostic agent may take after a failed run. The model is a remote service that can be slow or down,
+# and the worker and the webhook wait for the agent, so it is cut off after this and the run goes on without a
+# recommendation
+DIAGNOSTIC_TIMEOUT_SECONDS = _positive_int("DIAGNOSTIC_TIMEOUT_SECONDS", 120)
+
+# the longest the diagnostic agent may take after a failed run. The model is a remote service that can be slow or down,
+# and the worker and the webhook wait for the agent, so it is cut off after this and the run goes on without a
+# recommendation
+DIAGNOSTIC_TIMEOUT_SECONDS = _positive_int("DIAGNOSTIC_TIMEOUT_SECONDS", 120)
+
+# the largest file an ingestion step downloads, in megabytes
+MAX_DOWNLOAD_MB = _positive_int("MAX_DOWNLOAD_MB", 100)
+
+# By default a pipeline source and a webhook may not point at a private, loopback or link-local address, because the
+# worker runs inside the cluster and could be made to call its database, its Redis or the cloud metadata service.
+# Set this to true only on a developer machine or where every tenant is trusted. See docs/PRODUCTION.md
+ALLOW_PRIVATE_URLS = os.getenv("ALLOW_PRIVATE_URLS", "false").strip().lower() in ("true", "1", "yes")
+
+_REQUIRED_SECRETS = ("DATABASE_URL", "DATABASE_URL_SYNC", "REDIS_URL", "DATA_WAREHOUSE_URL", "API_KEY_SECRET", "ADMIN_SECRET_KEY")
+_MIN_SECRET_LENGTH = 16
+
+
+def settings_problems(env=None):
+    """What is wrong with the configuration, as a list of sentences. Empty when it is usable.
+
+    Every setting is required. When ENV is "production" the two secrets must also be long and different from each
+    other.
+    """
+    env = os.environ if env is None else env
+    problems = []
+    for name in _REQUIRED_SECRETS:
+        if not (env.get(name) or "").strip():
+            problems.append(f"{name} is not set")
+    if env.get("ENV", "dev") == "production":
+        api_key_secret = env.get("API_KEY_SECRET") or ""
+        admin_secret = env.get("ADMIN_SECRET_KEY") or ""
+        for name, value in (("API_KEY_SECRET", api_key_secret), ("ADMIN_SECRET_KEY", admin_secret)):
+            if value.strip() and len(value) < _MIN_SECRET_LENGTH:
+                problems.append(f"{name} must be at least {_MIN_SECRET_LENGTH} characters when ENV=production")
+        if api_key_secret and api_key_secret == admin_secret:
+            problems.append("API_KEY_SECRET and ADMIN_SECRET_KEY must differ when ENV=production")
+    return problems
+
+
+def validate_settings():
+    """Stop the process at startup, naming every problem, instead of failing on the first request that needs a setting."""
+    problems = settings_problems()
+    if problems:
+        raise RuntimeError("invalid configuration: " + "; ".join(problems))

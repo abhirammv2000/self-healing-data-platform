@@ -6,6 +6,7 @@ real queue and the real database, with short timings so the test takes a few sec
 """
 import asyncio
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -35,10 +36,20 @@ def start_worker(tmp_path, name):
         "ENQUEUE_VISIBILITY_SECONDS": "5",
         "WORKER_METRICS_PORT": str(free_port()),
         "OTEL_TRACES_ENABLED": "false",
+        "ALLOW_PRIVATE_URLS": "true",  # the data source of these tests is on 127.0.0.1
         "PYTHONPATH": str(REPO_ROOT),
     }
     log = open(tmp_path / f"{name}.log", "w")
-    return subprocess.Popen([sys.executable, "-m", "worker.app.main"], cwd=tmp_path, env=env, stdout=log, stderr=log)
+    # a new process group on Windows, so Ctrl+Break can be sent to this worker alone
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    return subprocess.Popen(
+        [sys.executable, "-m", "worker.app.main"], cwd=tmp_path, env=env, stdout=log, stderr=log, creationflags=flags
+    )
+
+
+def ask_to_stop(worker):
+    """What Kubernetes does first: SIGTERM (Ctrl+Break on Windows, the nearest thing), then it waits."""
+    worker.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
 
 
 async def wait_for(run_id, statuses, seconds):
@@ -96,3 +107,30 @@ async def test_a_worker_starts_the_runs_of_a_schedule_and_finishes_them(world, t
 
     assert [run.status for run in runs] == ["success"]  # one run for the missed times, and it finished
     assert runs[0].idempotency_key.startswith(f"schedule:{schedule_id}:")
+
+
+@pytest.mark.real_http
+async def test_a_worker_told_to_stop_finishes_its_run_and_takes_no_other(world, tmp_path):
+    pipeline = await world.pipeline("/slow.csv?secs=4")
+    other_pipeline = await world.pipeline("/ok.csv")
+    run_id = await world.run(pipeline)
+    waiting_id = await world.run(other_pipeline)
+
+    worker = start_worker(tmp_path, "worker")
+    try:
+        await run_queue.enqueue_run(run_id)
+        run = await wait_for(run_id, {"running"}, 120)
+        assert run.status == "running"
+        await run_queue.enqueue_run(waiting_id)  # on the queue behind the run in hand
+        ask_to_stop(worker)
+        exit_code = await asyncio.get_running_loop().run_in_executor(None, lambda: worker.wait(timeout=60))
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+
+    run = await helpers.get_run(run_id)
+    waiting = await helpers.get_run(waiting_id)
+    assert exit_code == 0  # it left by itself, it was not killed
+    assert run.status == "success" and run.attempts == 1  # the run in hand was finished, not abandoned
+    assert waiting.status == "queued"  # and the next one was left for another worker
+    assert waiting_id in await helpers.queue_contents()

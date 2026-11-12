@@ -1,9 +1,16 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_fastapi_instrumentator import Instrumentator
 from shared.observability import setup_tracing, setup_logging, get_logger
+from shared.config import validate_settings
 from shared.db import asyncio_engine
+from shared.redis_client import redis_client
 from control_plane.app.routes.tenants import router as tenant_router
 from control_plane.app.routes.pipelines import router as pipeline_router
 from control_plane.app.routes.pipeline_steps import router as pipeline_step_router
@@ -19,7 +26,15 @@ setup_tracing("control-plane")
 setup_logging()
 log=get_logger(__name__)
 
-app=FastAPI()
+@asynccontextmanager
+async def lifespan(app):
+    #a missing or weak secret stops the process here, with every problem named, instead of surfacing as a 500 on the
+    #first request that needs it
+    validate_settings()
+    yield
+
+
+app=FastAPI(lifespan=lifespan)
 
 #FastAPIInstrumentor gives every request its own span (method, route, status code);
 #SQLAlchemyInstrumentor nests a child span under it for each query, so a trace shows which
@@ -39,7 +54,28 @@ def get_root():
 
 @app.get("/health")
 def get_health():
+    #liveness: the process answers. It must not depend on Postgres or Redis, or a database outage would restart every pod
     return {"status": "healthy"}
+
+async def _check_postgres():
+    async with asyncio_engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))
+
+@app.get("/ready")
+async def get_ready():
+    #readiness: this pod can serve requests, which needs Postgres and Redis. Each check has a short timeout so a
+    #hung dependency shows up as 503 instead of a probe that hangs
+    checks={"postgres":_check_postgres,"redis":redis_client.ping}
+    results={}
+    for name,check in checks.items():
+        try:
+            await asyncio.wait_for(check(),timeout=2)
+            results[name]="ok"
+        except Exception as e:
+            log.warning("readiness_check_failed",dependency=name,error=type(e).__name__)
+            results[name]="unavailable"
+    ready=all(value=="ok" for value in results.values())
+    return JSONResponse(status_code=200 if ready else 503,content={"status":"ready" if ready else "not ready","checks":results})
 
 app.include_router(tenant_router,prefix="/tenants",tags=["Tenants"]) #add the tenants routes
 app.include_router(pipeline_router,prefix="/tenants/{tenant_id}/pipelines",tags=["Pipelines"], dependencies=[Depends(verify_tenant)]) #add the pipelines routes

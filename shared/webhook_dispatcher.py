@@ -1,4 +1,4 @@
-import httpx
+from shared.url_guard import check_url_syntax, guarded_client
 from shared.utils import now_naive
 from shared.db import async_session
 from shared.observability import get_logger
@@ -22,7 +22,9 @@ async def dispatch_webhook_callback(callback_url: str, run_id: int, pipeline_id:
     webhook_callback_dict={"tenant_id": tenant_id, "pipeline_id": pipeline_id, "run_id": run_id, "callback_url": callback_url, "payload": payload}
     
     try:
-        async with httpx.AsyncClient(timeout=15) as client: #timeout avoids hanging if the callback endpoint never responds
+        check_url_syntax(callback_url)
+        #guarded_client refuses a private address, see shared/url_guard.py. The timeout avoids hanging if the endpoint never responds
+        async with guarded_client(timeout=15) as client:
             response=await client.post(url=callback_url,json=payload)
 
         webhook_callback_dict["http_status_code"]=response.status_code

@@ -9,6 +9,7 @@ The database is a small fake that answers each query by looking at the SQL it wa
 depend on the order of the queries. The steps, the clock, the sleep, the agent and the webhook are replaced.
 These tests check the executor's own decisions, not SQLAlchemy or Postgres.
 """
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -728,6 +729,21 @@ async def test_a_failing_diagnostic_agent_does_not_change_the_result_or_stop_the
 
     assert result.status == "success"
     assert h.webhooks == [("https://hook", 1, 7, 3, "success", None)]
+
+
+async def test_an_agent_that_hangs_is_cut_off_and_the_webhook_still_goes(harness, monkeypatch):
+    h = harness([step(1, "boom")], callback_url="https://hook")
+    monkeypatch.setattr(executor, "DIAGNOSTIC_TIMEOUT_SECONDS", 0.05)
+
+    async def hangs(run_context):
+        await asyncio.sleep(30)
+
+    h.agent.side_effect = hangs
+
+    with pytest.raises(RuntimeError):
+        await asyncio.wait_for(h.run(), timeout=5)  # the run's own error, not the agent's timeout
+
+    assert h.webhooks == [("https://hook", 1, 7, 3, "failed", None)]  # no recommendation, but the webhook went
 
 
 async def test_the_agent_runs_after_a_failure_and_its_recommendation_goes_to_the_webhook(harness):

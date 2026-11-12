@@ -188,10 +188,9 @@ async def test_a_lost_wake_up_costs_time_not_the_run(world, monkeypatch):
 
     pipeline = await world.pipeline()
     waiting = await world.run(pipeline)
-    monkeypatch.setattr(run_queue.redis_client, "rpush", AsyncMock(side_effect=ConnectionError("redis is down")))
-
-    assert await wake_waiting_run(pipeline) is False
-    monkeypatch.undo()
+    with monkeypatch.context() as down:  # only this patch is undone, the fetch stub of the fixtures stays
+        down.setattr(run_queue.redis_client, "rpush", AsyncMock(side_effect=ConnectionError("redis is down")))
+        assert await wake_waiting_run(pipeline) is False
 
     assert await requeue_unqueued_runs() == 1
     await helpers.work()
